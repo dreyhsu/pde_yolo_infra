@@ -1,0 +1,10 @@
+Scripts in the root directory of PDE_yolo_infra:
+
+1. rename_files.py:
+   Renames .jpg and .txt files within a target directory by prepending the directory's name to each file. This helps prevent filename collisions when combining multiple datasets.
+
+2. train_yolov11.py:
+   Trains/fine-tunes a YOLO object detection model using the Ultralytics library. It is configured for GPU training with specific data paths and data augmentation parameters (like 180-degree rotation and flipping).
+
+3. split_dataset.py:
+   Randomly selects 20% of images and their corresponding labels from the train folders and moves them to validation (val) folders to create a validation set.
