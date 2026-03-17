@@ -1,7 +1,7 @@
 import os
 import sys
 
-TARGET_PATH = r"train_dataset\wahoo_0209\acc_0211"
+TARGET_PATH = r"train_dataset\tether_0209"
 
 def rename_files(target_path):
     """

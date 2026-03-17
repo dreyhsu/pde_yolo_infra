@@ -2,9 +2,70 @@ Scripts in the root directory of PDE_yolo_infra:
 
 1. rename_files.py:
    Renames .jpg and .txt files within a target directory by prepending the directory's name to each file. This helps prevent filename collisions when combining multiple datasets.
+   - Example: python rename_files.py (Edit TARGET_PATH in script first)
 
 2. train_yolov11.py:
-   Trains/fine-tunes a YOLO object detection model using the Ultralytics library. It is configured for GPU training with specific data paths and data augmentation parameters (like 180-degree rotation and flipping).
+   Trains/fine-tunes a YOLO object detection model using the Ultralytics library. Configured for GPU training with specific data paths and augmentations (180-degree rotation, flipping, etc.).
+   - Example: python train_yolov11.py
 
 3. split_dataset.py:
-   Randomly selects 20% of images and their corresponding labels from the train folders and moves them to validation (val) folders to create a validation set.
+   Randomly selects a percentage (default 20%) of images and their corresponding labels from the 'train' folders and moves them to 'val' folders to create a validation set.
+   - Example: python split_dataset.py (Edit TARGET_PATH in script first)
+
+4. batch_cut_ffmpeg.py:
+   Batch processes video files to cut short clips based on timestamps provided in a CSV file.
+   - Example: python batch_cut_ffmpeg.py (Requires 'crop_task.csv' with video_name, start, end, new_name)
+
+5. convert2h264.py:
+   Converts video files to H.264 codec using FFmpeg, with options for quality presets and resizing.
+   - Example: python convert2h264.py video/input.mp4 --quality high --resize 640 640 output.mp4
+
+6. crop_frames.py:
+   Interactive tool to select a crop region (ROI) and optional blocking areas (to hide sensitive info) in a video, then extracts all frames as cropped/blocked images.
+   - Example: python crop_frames.py (Edit VIDEO_PATH and OUTPUT_FOLDER in script first)
+
+7. roi_select.py:
+   Interactive tool to manually select multiple Regions of Interest (ROIs) on a single image and save their coordinates (x, y, w, h) to a text file.
+   - Example: python roi_select.py (Edit IMAGE_PATH in script; press 's' to save ROI, 'q' to finish)
+
+8. apply_black_masks.py:
+   Interactive tool to define rectangular mask areas and apply them (black out) to all images in a directory. Useful for privacy or removing static noise.
+   - Example: python apply_black_masks.py (Follow interactive prompts)
+
+9. augment_yolo.py:
+   Comprehensive YOLO dataset augmentation CLI tool. Supports YOLO, PASCAL VOC, and CVAT formats. Can perform random or fixed-angle rotations while syncing bounding boxes.
+   - Example: python augment_yolo.py --images_dir ./imgs --labels_dir ./lbls --output_images ./aug_imgs --output_labels ./aug_lbls --num_augmentations 5
+
+10. augment_image_only.py:
+    Batch image augmentation tool using Albumentations. Augments only images (no labels) with effects like rotation, blur, noise, and brightness changes.
+    - Example: python augment_image_only.py -i ./input_folder -o ./output_folder -n 3
+
+11. inference_for_cvat.py:
+    Runs YOLO inference on a directory of images and exports the results in a ZIP file (YOLO 1.1 format) ready for upload to CVAT for AI-assisted labeling.
+    - Example: python inference_for_cvat.py (Edit model_path and image_dir in script)
+
+12. move_labeled_data.py:
+    Organizes labeled data by moving images and labels from various subdirectories into a structured 'train/images' and 'train/labels' format.
+    - Example: python move_labeled_data.py (Edit source_root and target_root in script)
+
+13. run_inference.py:
+    Simple script to run YOLO inference on a video file and save the annotated output.
+    - Example: python run_inference.py (Edit model_path and video_path in script)
+
+--- Workflow: Preparing Data for CVAT Labeling ---
+If you have long videos and need to extract specific cropped regions:
+1. Batch Cut Clips: Use 'batch_cut_ffmpeg.py' with 'crop_task.csv'.
+2. Extract & Crop Frames: Use 'crop_frames.py' to extract frames with ROIs.
+3. Apply Masks: (Optional) Use 'apply_black_masks.py' to hide sensitive areas across all extracted frames.
+4. Upload to CVAT: Zip the frames and upload as a new Task.
+
+--- Workflow: AI-Assisted Labeling (Pre-labeling) ---
+To speed up labeling with an existing model:
+1. Generate Pre-labels: Run 'inference_for_cvat.py' on your extracted frames.
+2. Upload Annotations: In CVAT, use "Upload Annotations" -> "YOLO 1.1" and select the generated 'cvat_annotations.zip'.
+
+--- Workflow: Dataset Augmentation & Training ---
+1. Organize Data: Use 'move_labeled_data.py' to consolidate labels from CVAT exports.
+2. Augment: Use 'augment_yolo.py' to increase dataset size/diversity.
+3. Split: Use 'split_dataset.py' to create a validation set.
+4. Train: Run 'train_yolov11.py' to start training.

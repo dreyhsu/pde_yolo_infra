@@ -1,3 +1,11 @@
 *.pt
+*.mp4
 train_dataset/
 runs/
+logs/
+model/
+cvat_annotations.zip
+transfer.zip
+*.zip
+cvat_yolo_export/
+image/
