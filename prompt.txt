@@ -1,1 +1,64 @@
 python augment_yolo.py --images_dir "D:\Dre\PDE_yolo_infra\train_dataset\wahoo_0316_aug\images\train" --labels_dir "D:\Dre\PDE_yolo_infra\train_dataset\wahoo_0316_aug\labels\train" --output_images "D:\Dre\PDE_yolo_infra\train_dataset\wahoo_0316_aug\images\train" --output_labels "D:\Dre\PDE_yolo_infra\train_dataset\wahoo_0316_aug\labels\train" --num_augmentations 3 --rotate_limit 30
+
+沒問題！以下是為您量身打造的 API 設計概念與輸入/輸出規格，完全符合您描述的操作流程（查詢型號 ➡️ 選擇模式 ➡️ 啟動對應的 DeepStream）。
+
+---
+
+
+**概念：** 當使用者在網頁 UI 輸入產品型號（例如：`7006-400110-01`）後，UI 會呼叫這個 API。伺服器會根據內部資料庫或設定檔進行比對，並回傳對應的「機型名稱 (model_name)」以及「可用的模式列表 (mode_options)」。UI 收到回傳值後，若發現有多個模式，便可以顯示下拉式選單供使用者挑選。
+
+* **請求方法與端點：** `GET /model`
+* **輸入 (Input)：** 使用 Query Parameter 傳遞型號。
+    * *網址範例：* `GET /model?model_number=7006-400110-01`
+
+* **輸出 (Output) - 成功 (HTTP 200 OK)：**
+    回傳該型號的詳細資訊。注意 `mode_options` 是一個陣列（Array），這樣 UI 就能直接拿來生成選單。
+    ```json
+    {
+      "model_number": "7006-400110-01",
+      "model_name": "Queen",
+      "mode_options": [
+        "1_op_mode", 
+        "multi_op_mode"
+      ]
+    }
+    ```
+
+* **輸出 (Output) - 找不到型號 (HTTP 404 Not Found)：**
+    如果使用者輸入了錯誤或不存在的型號。
+    ```json
+    {
+      "detail": "not_found"
+    }
+    ```
+
+---
+
+### 第二階段：啟動 API（更新現有的 `/start`）
+
+**概念：** 使用者在 UI 上確認了序號 (serial_number)，並從剛才的下拉選單中選好了模式 (selected_mode) 後，按下「開始」按鈕。此時，UI 需要將這三個關鍵資訊一起打包發送給後端。後端的 FastAPI 接收到後，就可以寫一段 `if/else` 或查表邏輯，根據 `selected_mode` 去動態選擇要執行哪一個特定的 DeepStream 執行檔或 Config 檔。
+
+* **請求方法與端點：** `POST /start`
+* **輸入 (Input - JSON Body)：** 這是您原本的 `StartRequest` 需要擴充的地方，加入型號與使用者選擇的模式。
+    ```json
+    {
+      "serial_number": "SN123456789",
+      "model_number": "7006-400110-01",
+      "selected_mode": "multi_op_mode"
+    }
+    ```
+
+* **輸出 (Output - 成功 HTTP 200 OK)：**
+    伺服器成功啟動對應的 DeepStream 程式後，回傳標準的狀態（與您目前的設計保持一致）。
+    ```json
+    {
+      "serial_number": "SN123456789",
+      "status": "ok"
+    }
+    ```
+
+---
+
+這樣的設計將資料查詢與實際執行清楚分開，UI 邏輯會變得非常乾淨，後端也能精準掌控要啟動哪個 DeepStream 實體。
+
+**需要我進一步向您說明，如何在 FastAPI 中安全地更新您的 `StartRequest` 資料模型（Pydantic BaseModel），讓它能同時相容舊有請求與新的輸入格式嗎？**

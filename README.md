@@ -26,8 +26,10 @@ Organize, expand, and train on your labeled data.
 2. **Rename Files:** Prevent collisions when merging datasets with `data_rename_unique.py`.
 3. **Augment YOLO:** Boost your dataset size/diversity with `data_augment_yolo.py`.
 4. **Augment Images:** Perform pure image augmentation with `data_augment_images.py`.
-5. **Split Dataset:** Create your validation set with `data_split_val.py`.
-6. **Train:** Start training your model with `train_yolo.py`.
+5. **Flip 180:** Augment dataset by flipping 180 degrees with `data_augment_flip.py`.
+6. **Visualize Labels:** Verify your annotations with `data_visualize.py`.
+7. **Split Dataset:** Create your validation set with `data_split_val.py`.
+8. **Train:** Start training your model with `train_yolo.py`.
 
 ---
 
@@ -49,6 +51,8 @@ Organize, expand, and train on your labeled data.
 - `data_rename_unique.py`: Prepends folder names to files to ensure unique filenames.
 - `data_augment_yolo.py`: CLI for YOLO/VOC dataset augmentation with bounding box syncing.
 - `data_augment_images.py`: Quick batch image-only augmentation using Albumentations.
+- `data_augment_flip.py`: Flips an entire YOLO dataset (images and labels) 180 degrees. Should modify the python record script, flip the record video. 
+- `data_visualize.py`: Interactive tool to browse and verify YOLO annotations on images.
 - `data_split_val.py`: Randomly splits data into training and validation sets.
 
 ### 🏎️ Training (`train_`)

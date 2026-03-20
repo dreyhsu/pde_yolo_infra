@@ -3,10 +3,10 @@ import os
 
 def run_inference():
     # Model path as specified by the user
-    model_path = r"D:\Dre\PDE_yolo_infra\logs\0316_11s_640\pt_yolo_precision_run2\weights\best.pt"
+    model_path = r"D:\Dre\PDE_yolo_infra\logs\0317_11s_1280_aug_34176\0317_11s_1280_aug\pt_yolo_precision_run\weights\yolo11s_1280_34176_aug.pt"
     # model_path = r"D:\Dre\PDE_yolo_infra\logs\0223_11s_640\pt_yolo_precision_run2\weights\best.pt"
     # Video path as specified by the user
-    video_path = r"clip/sticker_5.mp4"
+    video_path = r"D:\Dre\PDE_yolo_infra\video\wahoo\2026-03-11_030438.mp4"
 
     # Check if files exist
     if not os.path.exists(model_path):
@@ -25,7 +25,7 @@ def run_inference():
     print(f"Running inference on: {video_path}")
     results = model.predict(
         source=video_path,
-        conf=0.20,        # Confidence threshold
+        conf=0.5,        # Confidence threshold
         save=True,        # Save the result
         device='cuda',    # Use GPU if available, otherwise change to 'cpu'
         show=False        # Set to True if you want to see the live window

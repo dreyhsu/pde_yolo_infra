@@ -9,3 +9,6 @@ transfer.zip
 *.zip
 cvat_yolo_export/
 image/
+clip/
+video/
+transfer/
