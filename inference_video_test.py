@@ -4,9 +4,9 @@ import os
 def run_inference():
     # Model path as specified by the user
     model_path = r"D:\Dre\PDE_yolo_infra\model\hph_hw.pt"
-    # model_path = r"D:\Dre\PDE_yolo_infra\logs\0223_11s_640\pt_yolo_precision_run2\weights\best.pt"
+    # model_path = r"D:\Dre\PDE_yolo_infra\logs\hph_hw\pt_yolo_precision_run\weights\best.pt"
     # Video path as specified by the user
-    video_path = r"D:\Dre\PDE_yolo_infra\video\hph_honeywell\test_1video_2026-06-07_001342.mp4"
+    video_path = r"D:\Dre\PDE_yolo_infra\video\hph_honeywell\ng_test\2026-06-02_070640\screen_flip.mp4"
 
     # Check if files exist
     if not os.path.exists(model_path):

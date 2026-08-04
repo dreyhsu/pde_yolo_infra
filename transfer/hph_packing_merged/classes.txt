@@ -1,9 +1,0 @@
-screen
-screeninbag
-battery
-chargingcable
-screeninbox
-manualinbox
-label1
-label2
-label3

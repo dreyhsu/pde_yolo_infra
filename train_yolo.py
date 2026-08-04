@@ -10,8 +10,8 @@ if __name__ == '__main__':
     # Fine-tune with ultralytics.
     # model.train(data=r"D:\Dre\NK_PDE\yolo_dataset\0108_180\data.yaml", epochs=300, project="logs/0109_pt", name="pt_yolo11s_0109_2", workers=0, device='cuda', patience=20)
     model.train(
-        data=r"train_dataset\p01_0427\data.yaml",
-        project="logs/0427_11s_640_p01",
+        data=r"D:\Dre\PDE_yolo_infra\transfer\hph_packing_merged\data.yaml",
+        project="logs/hph_hw",
         name="pt_yolo_precision_run",
         
         # --- Core Training Params ---
