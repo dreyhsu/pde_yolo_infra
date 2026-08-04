@@ -1,0 +1,13 @@
+path: D:\Allen\AI_Platform\AI-Generative Imaging\temp\export_1785719638468\test_yolo
+train: images
+val: images
+names:
+  '0': screeninbag
+  '1': battery
+  '2': charging-cable
+  '3': screeninbox
+  '4': manualinbox
+  '5': label1
+  '6': label2
+  '7': label3
+  '8': screen
