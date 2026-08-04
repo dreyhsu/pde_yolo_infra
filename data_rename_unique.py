@@ -1,7 +1,7 @@
 import os
 import sys
 
-TARGET_PATH = r"train_dataset\tether_0209"
+TARGET_PATH = r"D:\Dre\PDE_yolo_infra\image\hph_hw1"
 
 def rename_files(target_path):
     """

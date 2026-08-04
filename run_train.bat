@@ -1,4 +1,4 @@
 @echo off
 call conda activate env_ultralytics
-python train_yolov11.py
+python train_yolo.py
 pause

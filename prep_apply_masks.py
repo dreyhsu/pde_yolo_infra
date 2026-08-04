@@ -3,9 +3,10 @@ import os
 import glob
 import json
 
-MASK_FILE = 'masks.json'
+MASK_FILE = 'hph_hw_masks.json'
 IMAGE_EXTENSIONS = ['*.jpg', '*.jpeg', '*.png', '*.JPG', '*.JPEG', '*.PNG']
-GLOBAL_OUTPUT_DIR = r'D:\Dre\PDE_yolo_infra\image\masked'
+GLOBAL_OUTPUT_DIR = r'D:\Dre\PDE_yolo_infra\image\masked_hph_hw3'
+ROOT_IMAGE_DIR = r'D:\Dre\PDE_yolo_infra\image\hph_hw3'
 
 def save_masks(masks, filename=MASK_FILE):
     with open(filename, 'w') as f:
@@ -114,7 +115,7 @@ def process_folder(folder_path, masks, output_dir):
         cv2.imwrite(os.path.join(output_dir, unique_filename), img)
 
 def main():
-    root_image_dir = r'D:\Dre\PDE_yolo_infra\image'
+    root_image_dir = ROOT_IMAGE_DIR
     
     # 1. Ensure Global Output Folder exists
     if not os.path.exists(GLOBAL_OUTPUT_DIR):

@@ -4,9 +4,10 @@ import sys
 import ctypes
 
 # --- Configuration ---
-OUTPUT_FOLDER = 'image/tether5'
+OUTPUT_FOLDER = 'image/hph_hw3'
 IMAGE_FORMAT = 'jpg'
-VIDEO_PATH = 'clip/tether5.mp4'
+VIDEO_PATH = 'clip/hph_03.mp4'
+FRAME_INTERVAL = 5  # Extract every Nth frame (1 = every frame, 3 = every 3rd frame, etc.)
 
 # Global variables for mouse callback
 ref_point = []
@@ -224,7 +225,8 @@ def main():
 
     # --- Step 2: Process Video ---
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0) # Rewind
-    frame_count = 0
+    video_frame_idx = 0
+    saved_count = 0
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
     while True:
@@ -232,6 +234,11 @@ def main():
         if not ret:
             break
             
+        # Skip frames based on interval
+        if video_frame_idx % FRAME_INTERVAL != 0:
+            video_frame_idx += 1
+            continue
+
         # Apply blocks
         for b in blocks:
             # b is ((x1, y1), (x2, y2))
@@ -242,18 +249,20 @@ def main():
 
         # Double check crop is valid before saving
         if cropped_frame.size == 0:
+            video_frame_idx += 1
             continue
 
-        out_name = f"{OUTPUT_FOLDER.split('/')[-1]}_frame_{frame_count:05d}.{IMAGE_FORMAT}"
+        out_name = f"{OUTPUT_FOLDER.split('/')[-1]}_frame_{video_frame_idx:05d}.{IMAGE_FORMAT}"
         out_path = os.path.join(OUTPUT_FOLDER, out_name)
 
         cv2.imwrite(out_path, cropped_frame)
-        frame_count += 1
+        saved_count += 1
+        video_frame_idx += 1
         
-        if frame_count % 50 == 0:
-            print(f"Saved {frame_count}/{total_frames} frames...", end='\r')
+        if saved_count % 50 == 0:
+            print(f"Saved {saved_count} frames (current frame: {video_frame_idx}/{total_frames})...", end='\r')
 
-    print(f"\n✅ Done! Saved {frame_count} frames to '{OUTPUT_FOLDER}/'")
+    print(f"\n✅ Done! Saved {saved_count} frames to '{OUTPUT_FOLDER}/'")
     cap.release()
 
 if __name__ == "__main__":

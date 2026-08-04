@@ -6,7 +6,7 @@ from pathlib import Path
 
 # --- Configuration ---
 INPUT_CSV = 'crop_task.csv'
-VIDEO_DIR = 'video/wahoo'
+VIDEO_DIR = 'video/hph_honeywell'
 CLIP_DIR = 'clip'
 DEFAULT_EXTENSION = '.mp4'
 

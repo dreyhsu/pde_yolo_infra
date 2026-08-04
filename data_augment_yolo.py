@@ -142,12 +142,14 @@ def main(args):
 
     # --- 根據參數動態建立擴增流程 ---
     def create_transforms(rotate_limit=None, rotate_step=None):
-        # 基本擴增流程
+        # 基本擴增流程 (已調降強度以避免類別混淆)
         base_transforms = [
             A.HorizontalFlip(p=0.5),
-            A.Perspective(scale=(0.05, 0.1), p=0.3),
-            A.RandomBrightnessContrast(brightness_limit=0.2, contrast_limit=0.2, p=0.5),
-            A.HueSaturationValue(hue_shift_limit=20, sat_shift_limit=30, val_shift_limit=20, p=0.3),
+            # 降低透視變換強度，避免小零件變形過度
+            A.Perspective(scale=(0.01, 0.04), p=0.2),
+            # 降低亮度和對比度變動，保留零件邊緣與陰影特徵
+            A.RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.1, p=0.3),
+            # 移除 HueSaturationValue 以避免零件顏色與背景混淆
         ]
 
         if rotate_step is not None:
@@ -271,3 +273,5 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     main(args)
+
+# --images_dir D:\Dre\PDE_yolo_infra\train_dataset\p01_0427\images\train --labels_dir D:\Dre\PDE_yolo_infra\train_dataset\p01_0427\labels\train --output_images D:\Dre\PDE_yolo_infra\train_dataset\p01_0427_aug\images\train --output_labels D:\Dre\PDE_yolo_infra\train_dataset\p01_0427_aug\labels\train

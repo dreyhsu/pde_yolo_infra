@@ -10,15 +10,15 @@ if __name__ == '__main__':
     # Fine-tune with ultralytics.
     # model.train(data=r"D:\Dre\NK_PDE\yolo_dataset\0108_180\data.yaml", epochs=300, project="logs/0109_pt", name="pt_yolo11s_0109_2", workers=0, device='cuda', patience=20)
     model.train(
-        data=r"train_dataset\wahoo_0316\data.yaml",
-        project="logs/0317_11s_1280",
+        data=r"train_dataset\p01_0427\data.yaml",
+        project="logs/0427_11s_640_p01",
         name="pt_yolo_precision_run",
         
         # --- Core Training Params ---
         epochs=500,
         patience=50,      # Increased patience: small objects take longer to converge
         batch=8,          # Lower batch size if you run out of VRAM due to high imgsz
-        imgsz=1280,       # CRITICAL: High res to resolve the thin wires/loops clearly
+        imgsz=640,       # CRITICAL: High res to resolve the thin wires/loops clearly
         device='cuda',
         workers=4,        # Set to 4-8 to speed up data loading if CPU allows
         

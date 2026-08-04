@@ -3,7 +3,7 @@ import random
 import shutil
 import sys
 
-TARGET_PATH = "train_dataset\wahoo_0316"
+TARGET_PATH = "train_dataset\p01_0427_aug"
 
 def split_dataset(target_path, val_ratio=0.2):
     """
