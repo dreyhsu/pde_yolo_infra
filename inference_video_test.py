@@ -25,7 +25,12 @@ def run_inference():
     print(f"Running inference on: {video_path}")
     results = model.predict(
         source=video_path,
-        conf=0.3,        # Confidence threshold
+        conf=0.7,         # Reject threshold for screen QC: a flipped screen scores <0.6
+                          # (out-of-distribution once orientation aug is off) so it is
+                          # rejected, while a correct OK screen scores ~0.9 and passes.
+                          # NOTE: this does NOT catch the no-plastic defect (it scores
+                          # near OK); see the plan's fallback (crop classifier) for that.
+        imgsz=1280,       # Match training resolution so fine plastic texture is resolved.
         save=True,        # Save the result
         device='cuda',    # Use GPU if available, otherwise change to 'cpu'
         show=False        # Set to True if you want to see the live window
