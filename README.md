@@ -13,6 +13,7 @@ Convert raw video segments into cropped, masked frames ready for annotation.
 3. **Select ROIs:** Use `prep_select_roi.py` for manual region selection if needed.
 4. **Apply Masks:** (Optional) Mask sensitive info or static noise with `prep_apply_masks.py`.
 5. **Convert Format:** Ensure video compatibility with `prep_convert_video.py`.
+6. **Pre-process Source (Optional):** Flip upside-down recordings with `prep_flip_video.py` or join split recordings with `prep_concat_videos.py` before extraction.
 
 ### 2. AI-Assisted Labeling (Inference)
 Speed up the annotation process by using existing models to pre-label data.
@@ -41,6 +42,8 @@ Organize, expand, and train on your labeled data.
 - `prep_apply_masks.py`: Interactively black out specific regions across a frame set.
 - `prep_select_roi.py`: Manually select and save ROI coordinates from images.
 - `prep_convert_video.py`: Re-encodes videos to H.264 or resizes them.
+- `prep_flip_video.py`: Flips a single video 180° (horizontal + vertical) using FFmpeg.
+- `prep_concat_videos.py`: Concatenates two videos (fast stream-copy, with a robust re-encode fallback via `--reencode`).
 
 ### 🧠 Inference (`inference_`)
 - `inference_cvat_prelabel.py`: Runs YOLO and exports a ZIP for CVAT's YOLO 1.1 format.
@@ -58,6 +61,9 @@ Organize, expand, and train on your labeled data.
 ### 🏎️ Training (`train_`)
 - `train_yolo.py`: Trains or fine-tunes a YOLO model using Ultralytics.
 
+### 📈 Analysis / Visualization (`generate_`)
+- `generate_plotly_chart.py`: Builds an interactive Plotly timeline (Gantt-style) of detected classes per frame, comparing model output against ground truth.
+
 ---
 
 ## ⚙️ Requirements
@@ -65,4 +71,5 @@ Organize, expand, and train on your labeled data.
 - OpenCV
 - Ultralytics (YOLO)
 - Albumentations
+- Plotly & pandas (for analysis/visualization)
 - FFmpeg (for video processing)

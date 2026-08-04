@@ -11,4 +11,5 @@ cvat_yolo_export/
 image/
 clip/
 video/
-transfer/
+# transfer/ is tracked in full, including .csv (overrides rules above)
+!transfer/**
