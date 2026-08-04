@@ -1,0 +1,13 @@
+path: /Users/chihjuihsu/Documents/python_script/pde_yolo_infra/transfer/hph_packing_merged
+train: images
+val: images
+names:
+  '0': screen
+  '1': screeninbag
+  '2': battery
+  '3': chargingcable
+  '4': screeninbox
+  '5': manualinbox
+  '6': label1
+  '7': label2
+  '8': label3
