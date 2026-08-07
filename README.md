@@ -45,6 +45,7 @@ Everything lives under `projects/<name>/`, so one checkout can serve several pro
 3. **Label ground truth:** `python eval_label_timeline.py --project projects/hph_hw --video test1`
    Draw ROIs, scrub the video, mark the frame range where each class is visible in an ROI and
    type its name and instance count. Several classes may be active at once. Press `h` for keys.
+   All input happens **inside the video window** — the terminal is only used for startup logs.
 4. **Report:** `python eval_report.py --project projects/hph_hw`
    Sweeps confidence thresholds offline (no re-inference), writes metric CSVs, a
    `leaderboard.md`, and the Gantt timeline chart.
