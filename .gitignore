@@ -25,6 +25,6 @@ projects/**
 !projects/*/classes.txt
 !projects/*/gt/
 !projects/*/gt/*.json
-
+calib/
 __pycache__/
 *.pyc

@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "time_unit": "frames",
+  "video_name": "normal1",
+  "video_path": "D:/Dre/PDE_yolo_infra/video/hph_honeywell/test_1video_2026-06-07_001448.mp4",
+  "fps": 23.999220593647838,
+  "total_frames": 1478,
+  "width": 1920,
+  "height": 1080,
+  "labeled_at": "2026-08-07T13:33:03",
+  "rois": [
+    {
+      "name": "roi1",
+      "x1": 570,
+      "y1": 513,
+      "x2": 1188,
+      "y2": 953
+    }
+  ],
+  "segments": [
+    {
+      "id": 1,
+      "roi": "roi1",
+      "class": "screen",
+      "count": 1,
+      "start_frame": 77,
+      "end_frame": 148,
+      "note": ""
+    },
+    {
+      "id": 2,
+      "roi": "roi1",
+      "class": "screeninbag",
+      "count": 1,
+      "start_frame": 240,
+      "end_frame": 818,
+      "note": ""
+    },
+    {
+      "id": 3,
+      "roi": "roi1",
+      "class": "battery",
+      "count": 1,
+      "start_frame": 695,
+      "end_frame": 701,
+      "note": ""
+    },
+    {
+      "id": 4,
+      "roi": "roi1",
+      "class": "chargingcable",
+      "count": 1,
+      "start_frame": 797,
+      "end_frame": 822,
+      "note": ""
+    },
+    {
+      "id": 5,
+      "roi": "roi1",
+      "class": "screeninbox",
+      "count": 1,
+      "start_frame": 838,
+      "end_frame": 920,
+      "note": ""
+    },
+    {
+      "id": 6,
+      "roi": "roi1",
+      "class": "manualinbox",
+      "count": 1,
+      "start_frame": 955,
+      "end_frame": 964,
+      "note": ""
+    },
+    {
+      "id": 7,
+      "roi": "roi1",
+      "class": "label1",
+      "count": 1,
+      "start_frame": 1144,
+      "end_frame": 1201,
+      "note": ""
+    },
+    {
+      "id": 8,
+      "roi": "roi1",
+      "class": "label2",
+      "count": 1,
+      "start_frame": 1295,
+      "end_frame": 1396,
+      "note": ""
+    },
+    {
+      "id": 9,
+      "roi": "roi1",
+      "class": "label3",
+      "count": 1,
+      "start_frame": 1427,
+      "end_frame": 1435,
+      "note": ""
+    }
+  ]
+}

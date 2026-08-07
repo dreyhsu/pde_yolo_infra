@@ -76,8 +76,8 @@ DEFAULT_QC = {
     "min_ring_median": 8.0,    # a black tray ring makes dark_ratio meaningless
 
     # --- thresholds (fitted to 3 frames; recalibrate with calibrate_screen_qc.py) ---
-    "dark_ratio_max": 0.55,    # below -> no_plastic   (0.135 vs 1.189 / 1.314)
-    "flip_marks_min": 0.15,    # above -> flipped      (0.263 vs 0.045 / 0.055)
+    "dark_ratio_max": 1.027,    # below -> no_plastic   (0.135 vs 1.189 / 1.314)
+    "flip_marks_min": 0.151,    # above -> flipped      (0.263 vs 0.045 / 0.055)
 }
 
 

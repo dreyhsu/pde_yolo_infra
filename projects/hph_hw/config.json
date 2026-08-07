@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "project": "hph_hw",
+  "classes_file": "classes.txt",
+  "cache_conf": 0.01,
+  "conf_sweep": [
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8
+  ],
+  "imgsz": 640,
+  "device": "cuda",
+  "iou_nms": 0.7,
+  "max_det": 300,
+  "stability_window": 3,
+  "merge_gap_frames": 2,
+  "min_segment_frames": 3,
+  "seg_iou_thresholds": [
+    0.1,
+    0.25,
+    0.5
+  ],
+  "score_weights": {
+    "frame_macro_f1": 0.5,
+    "seg_f1_025": 0.5
+  },
+  "screen_qc": {
+  "enabled": true,
+  "class": "screeninbox",
+  "min_conf": 0.25,
+  "thresholds": {}
+  },
+  "class_alias": {},
+  "models": [
+    {
+      "name": "yolo11s_all_aug",
+      "weights": "D:/Dre/PDE_yolo_infra/logs/hph_hw/yolo11s2/weights/best.pt"
+    },
+    {
+      "name": "yolo11n_all_aug",
+      "weights": "D:/Dre/PDE_yolo_infra/logs/hph_hw/yolo11n2/weights/best.pt"
+    },
+    {
+      "name": "yolo11n_1pack_pltform",
+      "weights": "D:/Dre/PDE_yolo_infra/model/hph_hw.pt"
+    },
+    {
+      "name": "yolo11s_all",
+      "weights": "D:/Dre/PDE_yolo_infra/logs/hph_hw/pt_yolo_precision_run/weights/best.pt"
+    }
+  ],
+  "videos": [
+    {
+      "name": "flip_screen",
+      "path": "D:/Dre/PDE_yolo_infra/video/hph_honeywell/ng_test/flip_screen/screen_flip.mp4"
+    },
+    {
+      "name": "no_plastic_bag",
+      "path": "D:/Dre/PDE_yolo_infra/video/hph_honeywell/ng_test/no_plastic_bag/no_plastic_bag.mp4"
+    },
+    {
+      "name": "normal1",
+      "path": "D:/Dre/PDE_yolo_infra/video/hph_honeywell/test_1video_2026-06-07_001448.mp4"
+    }
+  ]
+}
