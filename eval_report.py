@@ -33,6 +33,8 @@ from eval_common import (
     load_det_cache,
     load_project,
     pred_frame_counts,
+    qc_chart_lanes,
+    qc_lane_names,
     rle_segments,
     sanitize,
     smooth_segments,
@@ -292,6 +294,14 @@ def evaluate_pair(cfg, classes, gt, df, meta, roi_name, conf_thr):
              if (C[s:e + 1, k] > 0).any() else 0.0)
             for s, e in pred_segs
         ]
+
+    # Chart-only: the QC lanes carry no metrics, because scoring them needs an NG
+    # ground-truth schema the labeller does not have yet. They ride on the same
+    # detections as the class lane above them, just split by verdict.
+    chart_segments.update(
+        qc_chart_lanes(cfg, classes, df, meta, roi, conf_thr, total_frames,
+                       cfg.get("class_alias", {}))
+    )
 
     supported = [i for i, r in enumerate(frame_rows) if r["support_frames"] > 0]
     macro_f1 = float(np.mean([frame_rows[i]["f1"] for i in supported])) if supported else 0.0
@@ -573,7 +583,8 @@ def render_charts(args, cfg, classes, summary_df, chart_data, out_dir, sweep):
             if not per_model:
                 continue
             fig = build_gantt(
-                gt=gt, roi_name=roi, per_model_segments=per_model, classes=classes,
+                gt=gt, roi_name=roi, per_model_segments=per_model,
+                classes=classes + qc_lane_names(cfg, classes),
                 conf_thr=conf, title=f"{cfg['project']} -- {video} / {roi} @ conf {conf:.2f}",
                 dim_mode=args.dim_mode,
             )

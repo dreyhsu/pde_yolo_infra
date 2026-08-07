@@ -7,6 +7,12 @@ own lane and stay readable. Bar colour identifies the class; how washed-out the
 bar is encodes the model's mean confidence over that run -- dimmer means less
 sure.
 
+When a project enables screen_qc, three extra lanes appear per QC class --
+"<class>:ok", "<class>:no_plastic", "<class>:flipped" -- splitting that class's
+detections by the OpenCV verdict. They are additional to the plain class lane, not a
+replacement: a flipped screen IS still a screen in the tray, so the detection bar
+stays. The GT row has no QC lanes, since the labeller cannot record NG yet.
+
 Normally driven by eval_report.py. Run directly to re-render a chart without
 recomputing metrics:
 
@@ -185,7 +191,7 @@ def main():
     """Standalone path: rebuild a chart from the detection cache and ground truth."""
     from eval_common import (
         get_roi, load_classes, load_det_cache, load_gt, load_project,
-        pred_frame_counts, rle_segments, smooth_segments,
+        pred_frame_counts, qc_chart_lanes, qc_lane_names, rle_segments, smooth_segments,
     )
 
     parser = argparse.ArgumentParser(description="Render an evaluation Gantt timeline.")
@@ -233,6 +239,10 @@ def main():
                  if (confs[s:e + 1, k] > 0).any() else 0.0)
                 for s, e in segs
             ]
+        by_class.update(qc_chart_lanes(
+            cfg, classes, df, meta, roi, args.conf, int(gt["total_frames"]),
+            cfg.get("class_alias", {}),
+        ))
         per_model[m["name"]] = by_class
 
     if not per_model:
@@ -240,7 +250,8 @@ def main():
         return
 
     fig = build_gantt(
-        gt=gt, roi_name=args.roi, per_model_segments=per_model, classes=classes,
+        gt=gt, roi_name=args.roi, per_model_segments=per_model,
+        classes=classes + qc_lane_names(cfg, classes),
         conf_thr=args.conf,
         title=f"{cfg['project']} -- {args.video} / {args.roi} @ conf {args.conf:.2f}",
         dim_mode=args.dim_mode,

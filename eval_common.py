@@ -53,6 +53,16 @@ FALLBACK_PALETTE = [
     "#620042", "#1616A7", "#DA60CA", "#6C4516", "#0D2A63", "#AF0038",
 ]
 
+# Chart lanes for the screen_qc verdicts are named "<class>:<verdict>", e.g.
+# "screeninbox:flipped". They sit ALONGSIDE the plain detection lane rather than
+# replacing it: the detector answers "is a screen in the tray", which stays true for a
+# flipped or bare one, while the lanes answer whether it was placed correctly.
+QC_LANE_SEP = ":"
+
+# Green passes, red is the bare-screen defect, purple the flipped one. Kept out of
+# FALLBACK_PALETTE so a QC lane can never collide with a detection class colour.
+QC_LANE_COLORS = {"ok": "#2ca02c", "no_plastic": "#d62728", "flipped": "#9467bd"}
+
 DEFAULT_CONFIG = {
     "schema_version": SCHEMA_VERSION,
     "_comment": "Use forward slashes in Windows paths, e.g. D:/Dre/PDE_yolo_infra/...",
@@ -167,10 +177,17 @@ def build_class_id_map(model_names, classes, alias=None):
 
 
 def build_color_map(classes):
-    """Stable class -> #rrggbb. Legacy colours win; the rest come from the palette by index."""
+    """Stable class -> #rrggbb. QC lanes and legacy colours win; the rest come from the
+    palette by index."""
     color_map = {}
     used = 0
     for cls in classes:
+        lane = cls.split(QC_LANE_SEP, 1)[1] if QC_LANE_SEP in cls else None
+        if lane in QC_LANE_COLORS:
+            # `used` deliberately does not advance here: turning QC lanes on must not
+            # shift the palette colours of the detection classes underneath them.
+            color_map[cls] = QC_LANE_COLORS[lane]
+            continue
         legacy = LEGACY_COLOR_MAP.get(normalize(cls))
         if legacy:
             color_map[cls] = legacy
@@ -475,6 +492,104 @@ def pred_frame_counts(df, meta, roi, classes, conf_thr, total_frames, alias=None
     np.maximum.at(confs, (f, k), c)
 
     return counts, confs, stats
+
+
+# --------------------------------------------------------------------------
+# screen_qc chart lanes
+# --------------------------------------------------------------------------
+
+def qc_settings(cfg):
+    """(qc_class, thresholds) when the project enables screen_qc, else (None, None)."""
+    block = cfg.get("screen_qc") or {}
+    if not block.get("enabled"):
+        return None, None
+    return block.get("class", "screeninbox"), block.get("thresholds") or {}
+
+
+def qc_lane_names(cfg, classes):
+    """
+    Lane names to append to `classes` for charting, or [] when screen_qc is off.
+
+    screen_qc is imported lazily throughout this section: it needs cv2, and eval_report.py
+    otherwise has no reason to require OpenCV just to draw a chart.
+    """
+    qc_class, _ = qc_settings(cfg)
+    if not qc_class or qc_class not in classes:
+        return []
+    from screen_qc import QC_DEFECTS, QC_OK
+
+    return [f"{qc_class}{QC_LANE_SEP}{v}" for v in (QC_OK,) + tuple(QC_DEFECTS)]
+
+
+def qc_chart_lanes(cfg, classes, df, meta, roi, conf_thr, total_frames, alias=None):
+    """
+    {lane_name: [(start, end, mean_conf), ...]} for the screen_qc verdicts, or {} when
+    the stage is off or the cache predates it.
+
+    Verdicts come from the qc_* feature columns, thresholded HERE rather than at cache
+    time, so retuning dark_ratio_max/flip_marks_min only costs a re-render.
+
+    Filtering mirrors pred_frame_counts() exactly -- confidence, ROI by box centre,
+    frame range -- so a QC lane can never claim a frame the detection lane does not.
+    Where a frame holds several boxes of the class the highest-confidence one wins: the
+    station holds one tray at a time, same rule inference_screen_qc.py uses.
+    """
+    lanes = qc_lane_names(cfg, classes)
+    if not lanes:
+        return {}
+    if "qc_dark_ratio" not in getattr(df, "columns", ()):
+        return {}  # cache written before screen_qc existed; re-run eval_run_detect.py
+
+    from screen_qc import QC_UNKNOWN, classify_features, merge_qc_config
+
+    qc_class, thresholds = qc_settings(cfg)
+    qc_cfg = merge_qc_config(thresholds)
+
+    # Reuse the detection lane's own id mapping rather than matching names again --
+    # that is what guarantees the lanes and the bar above them describe the same boxes.
+    id_to_k, _, _ = build_class_id_map(meta.get("model_names", {}), classes, alias)
+    k_qc = classes.index(qc_class)
+    ids = [raw for raw, k in id_to_k.items() if k == k_qc]
+
+    verdicts = np.full(total_frames, QC_UNKNOWN, dtype=object)
+    best_conf = np.zeros(total_frames, dtype=np.float32)
+
+    if len(df) and ids:
+        frame = df["frame"].to_numpy(dtype=np.int64)
+        cls_id = df["cls_id"].to_numpy(dtype=np.int64)
+        conf = df["conf"].to_numpy(dtype=np.float32)
+        cx = (df["x1"].to_numpy(dtype=np.float64) + df["x2"].to_numpy(dtype=np.float64)) / 2.0
+        cy = (df["y1"].to_numpy(dtype=np.float64) + df["y2"].to_numpy(dtype=np.float64)) / 2.0
+        dark = df["qc_dark_ratio"].to_numpy(dtype=np.float64)
+        mark = df["qc_mark_frac"].to_numpy(dtype=np.float64)
+
+        keep = (conf >= float(conf_thr)) & np.isin(cls_id, ids)
+        keep &= (cx >= roi["x1"]) & (cx <= roi["x2"]) & (cy >= roi["y1"]) & (cy <= roi["y2"])
+        keep &= (frame >= 0) & (frame < total_frames)
+
+        idx = np.flatnonzero(keep)
+        # Ascending confidence, so the highest-confidence box is written last and wins.
+        for i in idx[np.argsort(conf[idx], kind="stable")]:
+            feats = None
+            if np.isfinite(dark[i]) and np.isfinite(mark[i]):
+                feats = {"dark_ratio": float(dark[i]), "mark_frac": float(mark[i])}
+            # feats is None where the box sat below screen_qc's min_conf or was
+            # unmeasurable -> QC_UNKNOWN, which gets no lane. A detection bar with no
+            # lane beneath it means "seen but not judged", not "judged OK".
+            verdicts[frame[i]] = classify_features(feats, qc_cfg)
+            best_conf[frame[i]] = conf[i]
+
+    merge_gap = cfg["merge_gap_frames"]
+    min_len = cfg["min_segment_frames"]
+    out = {}
+    for lane in lanes:
+        mask = verdicts == lane.split(QC_LANE_SEP, 1)[1]
+        out[lane] = [
+            (s, e, float(best_conf[s:e + 1][best_conf[s:e + 1] > 0].mean())
+             if (best_conf[s:e + 1] > 0).any() else 0.0)
+            for s, e in smooth_segments(rle_segments(mask), merge_gap, min_len)
+        ]
+    return out
 
 
 # --------------------------------------------------------------------------
