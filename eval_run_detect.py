@@ -5,6 +5,12 @@ Inference runs ONCE per pair at a very low confidence (cache_conf, default 0.01)
 and every surviving box is written to disk. eval_report.py then sweeps confidence
 thresholds offline, so changing the threshold never costs another GPU pass.
 
+If the project enables the optional "screen_qc" block, each box of the configured class
+also gets the screen_qc.py OpenCV features cached alongside it (qc_dark_ratio /
+qc_mark_frac). This loop is the only place in the pipeline where pixels and boxes coexist
+-- everything downstream reads the CSV. Features are cached, never verdicts, so OK/NG
+thresholds stay re-tunable offline for the same reason confidence does.
+
     python eval_run_detect.py --project projects/hph_hw
     python eval_run_detect.py --project projects/hph_hw --models yolo11n_e500 --videos test1
     python eval_run_detect.py --project projects/hph_hw --force
@@ -20,6 +26,7 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import cv2
 
 from eval_common import (
+    DET_SCHEMA_VERSION,
     SCHEMA_VERSION,
     cache_paths,
     load_classes,
@@ -28,8 +35,18 @@ from eval_common import (
     open_det_writer,
     resolve_class,
 )
+from screen_qc import extraction_fingerprint, merge_qc_config, screeninbox_features
 
 FLUSH_EVERY = 2000
+
+
+def qc_target_ids(model_names, class_name):
+    """Model class ids whose name matches `class_name`, ignoring case and separators."""
+    def norm(s):
+        return str(s).strip().lower().replace("-", "").replace("_", "").replace(" ", "")
+
+    target = norm(class_name)
+    return {int(k) for k, v in model_names.items() if norm(v) == target}
 
 
 def probe_video(path):
@@ -47,10 +64,15 @@ def probe_video(path):
     return info
 
 
-def is_cache_fresh(meta_path, weights, video_path, cache_conf, imgsz):
+def is_cache_fresh(meta_path, weights, video_path, cache_conf, imgsz, qc=None):
     """
     A cache is stale if the weights file, the video, or the inference settings
     changed. Cheap stat()-based check -- no hashing of multi-GB files.
+
+    `qc` is the screen_qc fingerprint (see build_qc_settings): whether the QC stage ran,
+    on which class, and with which extraction parameters. Verdict thresholds are NOT in
+    it -- they are applied to the cached features offline, so retuning one must not
+    trigger another GPU pass.
     """
     if not os.path.exists(meta_path):
         return False
@@ -60,7 +82,7 @@ def is_cache_fresh(meta_path, weights, video_path, cache_conf, imgsz):
     except (json.JSONDecodeError, OSError):
         return False
 
-    if meta.get("schema_version") != SCHEMA_VERSION:
+    if meta.get("det_schema_version") != DET_SCHEMA_VERSION:
         return False
     try:
         w_stat = os.stat(weights)
@@ -74,7 +96,25 @@ def is_cache_fresh(meta_path, weights, video_path, cache_conf, imgsz):
         and meta.get("video_size") == v_stat.st_size
         and float(meta.get("cache_conf", -1)) == float(cache_conf)
         and int(meta.get("imgsz", -1)) == int(imgsz)
+        and meta.get("screen_qc") == qc
     )
+
+
+def build_qc_settings(cfg):
+    """
+    Resolve the project's optional screen_qc block into the fingerprint stored in
+    meta.json, or None when the stage is off. Returns (settings, qc_cfg).
+    """
+    block = cfg.get("screen_qc") or {}
+    if not block.get("enabled"):
+        return None, None
+    qc_cfg = merge_qc_config(block.get("thresholds"))
+    settings = {
+        "class": block.get("class", "screeninbox"),
+        "min_conf": float(block.get("min_conf", 0.25)),
+        "extraction": extraction_fingerprint(qc_cfg),
+    }
+    return settings, qc_cfg
 
 
 def run_model_on_video(
@@ -90,6 +130,8 @@ def run_model_on_video(
     iou_nms=0.7,
     max_det=300,
     flush_every=FLUSH_EVERY,
+    qc_settings=None,
+    qc_cfg=None,
 ):
     """Stream inference over a video, appending every detection to a gzip CSV."""
     import ultralytics
@@ -99,9 +141,22 @@ def run_model_on_video(
     model = YOLO(weights)
     names = {str(k): v for k, v in model.names.items()}
 
+    # This loop is the only point in the pipeline where pixels and boxes coexist --
+    # everything downstream reads the CSV. So the screen_qc pixel pass has to happen
+    # here or not at all.
+    qc_ids, qc_min_conf = set(), 1.1
+    if qc_settings:
+        qc_ids = qc_target_ids(names, qc_settings["class"])
+        qc_min_conf = qc_settings["min_conf"]
+        if not qc_ids:
+            print(f"   ⚠ screen_qc is enabled for class {qc_settings['class']!r} but the "
+                  f"model has no such class -- no QC features will be cached")
+
     os.makedirs(os.path.dirname(out_csv_gz), exist_ok=True)
     fh, writer = open_det_writer(out_csv_gz)
     n_rows = 0
+    n_qc = 0
+    n_qc_unmeasurable = 0
     frames_decoded = 0
 
     try:
@@ -129,9 +184,23 @@ def run_model_on_video(
                 cls = boxes.cls.cpu().numpy().astype(int)
                 conf = boxes.conf.cpu().numpy()
                 for (x1, y1, x2, y2), c, p in zip(xyxy, cls, conf):
+                    qc_dark, qc_mark = "", ""
+                    # The min_conf gate matters: cache_conf is 0.01, so without it the
+                    # pixel pass would run on every junk box in every frame.
+                    if int(c) in qc_ids and float(p) >= qc_min_conf:
+                        feats = screeninbox_features(
+                            r.orig_img, (x1, y1, x2, y2), qc_cfg
+                        )
+                        if feats:
+                            qc_dark = round(feats["dark_ratio"], 6)
+                            qc_mark = round(feats["mark_frac"], 6)
+                            n_qc += 1
+                        else:
+                            n_qc_unmeasurable += 1
                     writer.writerow(
                         [frame_idx, int(c), round(float(p), 4),
-                         int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2))]
+                         int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2)),
+                         qc_dark, qc_mark]
                     )
                     n_rows += 1
             del r  # never retain a Results object past its frame
@@ -144,6 +213,7 @@ def run_model_on_video(
 
     meta = {
         "schema_version": SCHEMA_VERSION,
+        "det_schema_version": DET_SCHEMA_VERSION,
         "model_name": model_name,
         "weights": str(weights).replace("\\", "/"),
         "weights_size": os.path.getsize(weights),
@@ -164,10 +234,17 @@ def run_model_on_video(
         "max_det": int(max_det),
         "ultralytics_version": getattr(ultralytics, "__version__", "unknown"),
         "n_rows": n_rows,
+        "screen_qc": qc_settings,
+        "n_qc_measured": n_qc,
+        "n_qc_unmeasurable": n_qc_unmeasurable,
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
     with open(out_meta_json, "w", encoding="utf-8") as f:
         json.dump(meta, f, indent=2)
+
+    if qc_settings:
+        print(f"   🔍 screen_qc: {n_qc} {qc_settings['class']} boxes measured, "
+              f"{n_qc_unmeasurable} unmeasurable")
 
     if frames_decoded != video_info["total_frames_reported"]:
         print(
@@ -239,7 +316,12 @@ def main():
             print(f"   {p}")
         return
 
+    qc_settings, qc_cfg = build_qc_settings(cfg)
+
     print(f"🚀 {len(models)} model(s) x {len(videos)} video(s), cache_conf={cfg['cache_conf']}")
+    if qc_settings:
+        print(f"   screen_qc ON for class {qc_settings['class']!r} "
+              f"at conf >= {qc_settings['min_conf']}")
     for m in models:
         imgsz = model_conf(cfg, m, "imgsz")
         for v in videos:
@@ -247,7 +329,7 @@ def main():
             label = f"{m['name']} x {v['name']}"
 
             if not args.force and is_cache_fresh(
-                meta_path, m["weights"], v["path"], cfg["cache_conf"], imgsz
+                meta_path, m["weights"], v["path"], cfg["cache_conf"], imgsz, qc_settings
             ):
                 print(f"✅ cache fresh, skipped: {label}")
                 continue
@@ -265,6 +347,8 @@ def main():
                 device=model_conf(cfg, m, "device"),
                 iou_nms=cfg["iou_nms"],
                 max_det=cfg["max_det"],
+                qc_settings=qc_settings,
+                qc_cfg=qc_cfg,
             )
             report_class_mapping(meta["model_names"], classes, alias)
             print(f"   💾 {meta['frames_decoded']} frames, {meta['n_rows']} detections -> {det_path}")

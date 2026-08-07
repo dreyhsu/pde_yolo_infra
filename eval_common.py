@@ -21,6 +21,14 @@ import numpy as np
 SCHEMA_VERSION = 1
 NONE_CLASS = "__none__"
 
+# Version of the detection-cache format (DET_COLUMNS + meta.json), kept SEPARATE from
+# the project-config SCHEMA_VERSION on purpose. load_project() hard-fails on a config
+# whose schema_version does not match, so folding cache-format changes into it would
+# force every user to hand-edit config.json just because a new column was cached.
+# Bump this when DET_COLUMNS changes; is_cache_fresh() then re-runs inference.
+#   2 -- added qc_dark_ratio / qc_mark_frac (screen_qc.py)
+DET_SCHEMA_VERSION = 2
+
 # Colours carried over from generate_plotly_chart.py so charts stay recognisable.
 LEGACY_COLOR_MAP = {
     "teminal": "#ff7f0e",
@@ -62,6 +70,19 @@ DEFAULT_CONFIG = {
     "seg_iou_thresholds": [0.1, 0.25, 0.5],
     "score_weights": {"frame_macro_f1": 0.5, "seg_f1_025": 0.5},
     "class_alias": {},
+    # Optional OpenCV OK/NG stage for one class (see screen_qc.py). Off unless a
+    # project opts in, so no existing project changes behaviour. hph_hw sets:
+    #   {"enabled": true, "class": "screeninbox", "min_conf": 0.25}
+    # `min_conf` exists because cache_conf is 0.01 -- without it the pixel pass would
+    # run on every junk box in every frame. `thresholds` overrides screen_qc.DEFAULT_QC;
+    # leave it empty and re-threshold offline instead, since the cache stores the raw
+    # features rather than a verdict.
+    "screen_qc": {
+        "enabled": False,
+        "class": "screeninbox",
+        "min_conf": 0.25,
+        "thresholds": {},
+    },
     "models": [],
     "videos": [],
 }
@@ -344,7 +365,11 @@ def gt_segments_for(gt, roi_name, class_name):
 # Detection cache
 # --------------------------------------------------------------------------
 
-DET_COLUMNS = ["frame", "cls_id", "conf", "x1", "y1", "x2", "y2"]
+# qc_* hold screen_qc features, not verdicts, and are blank on every row the QC stage
+# did not measure. Caching features keeps the thresholds sweepable offline -- the same
+# reason detections are cached at cache_conf and swept over conf_sweep later.
+DET_COLUMNS = ["frame", "cls_id", "conf", "x1", "y1", "x2", "y2",
+               "qc_dark_ratio", "qc_mark_frac"]
 
 
 def cache_paths(project_dir, model_name, video_name):
