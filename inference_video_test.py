@@ -3,10 +3,10 @@ import os
 
 def run_inference():
     # Model path as specified by the user
-    model_path = r"D:\Dre\PDE_yolo_infra\model\hph_hw.pt"
+    model_path = r"D:\Dre\PDE_yolo_infra\logs\hph_hw\yolo11n2\weights\best.pt"
     # model_path = r"D:\Dre\PDE_yolo_infra\logs\hph_hw\pt_yolo_precision_run\weights\best.pt"
     # Video path as specified by the user
-    video_path = r"D:\Dre\PDE_yolo_infra\video\hph_honeywell\ng_test\2026-06-02_070640\screen_flip.mp4"
+    video_path = r"D:\Dre\PDE_yolo_infra\video\hph_honeywell\test_1video_2026-06-07_001448.mp4"
 
     # Check if files exist
     if not os.path.exists(model_path):
@@ -25,12 +25,12 @@ def run_inference():
     print(f"Running inference on: {video_path}")
     results = model.predict(
         source=video_path,
-        conf=0.7,         # Reject threshold for screen QC: a flipped screen scores <0.6
+        conf=0.2,         # Reject threshold for screen QC: a flipped screen scores <0.6
                           # (out-of-distribution once orientation aug is off) so it is
                           # rejected, while a correct OK screen scores ~0.9 and passes.
                           # NOTE: this does NOT catch the no-plastic defect (it scores
                           # near OK); see the plan's fallback (crop classifier) for that.
-        imgsz=1280,       # Match training resolution so fine plastic texture is resolved.
+        imgsz=640,       # Match training resolution so fine plastic texture is resolved.
         save=True,        # Save the result
         device='cuda',    # Use GPU if available, otherwise change to 'cpu'
         show=False        # Set to True if you want to see the live window

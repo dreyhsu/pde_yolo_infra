@@ -5,20 +5,20 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 if __name__ == '__main__':
     # Load the exported model.
     # model = YOLO(r"D:\Dre\NK_PDE\logs\0919_dino\0919\exported_models\exported_last.pt")
-    model = YOLO(r"yolo11s.pt")
+    model = YOLO(r"yolo11n.pt")
 
     # Fine-tune with ultralytics.
     # model.train(data=r"D:\Dre\NK_PDE\yolo_dataset\0108_180\data.yaml", epochs=300, project="logs/0109_pt", name="pt_yolo11s_0109_2", workers=0, device='cuda', patience=20)
     model.train(
-        data=r"D:\Dre\PDE_yolo_infra\transfer\hph_packing_merged\data.yaml",
+        data=r"D:\Dre\PDE_yolo_infra\train_dataset\hph_packing_merged_aug\data.yaml",
         project="logs/hph_hw",
-        name="pt_yolo_precision_run",
+        name="yolo11n",
         
         # --- Core Training Params ---
         epochs=500,
         patience=50,      # Increased patience: small objects take longer to converge
         batch=8,          # Lower batch size if you run out of VRAM due to high imgsz
-        imgsz=1280,       # CRITICAL for screen QC: high res resolves the thin plastic
+        imgsz=640,       # CRITICAL for screen QC: high res resolves the thin plastic
                           # sheen/wrinkles that distinguish OK vs no-plastic. Infer at 1280 too.
         device='cuda',
         workers=4,        # Set to 4-8 to speed up data loading if CPU allows
