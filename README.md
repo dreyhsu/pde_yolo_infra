@@ -32,6 +32,39 @@ Organize, expand, and train on your labeled data.
 7. **Split Dataset:** Create your validation set with `data_split_val.py`.
 8. **Train:** Start training your model with `train_yolo.py`.
 
+### 4. Model Evaluation
+Compare many models against many videos using human-labeled temporal ground truth.
+Everything lives under `projects/<name>/`, so one checkout can serve several projects.
+
+1. **Init:** `python eval_init_project.py --name hph_hw --classes-from <classes.txt | data.yaml | best.pt>`
+   then fill in `models[]` and `videos[]` in `projects/hph_hw/config.json` (use forward slashes).
+2. **Cache detections:** `python eval_run_detect.py --project projects/hph_hw`
+   Runs each model over each video **once** at `cache_conf` (0.01) and stores every raw box.
+   Do this first — it validates all paths and reports class-set mismatches before you spend
+   time labeling. Re-runs are skipped unless the weights, video, or settings changed.
+3. **Label ground truth:** `python eval_label_timeline.py --project projects/hph_hw --video test1`
+   Draw ROIs, scrub the video, mark the frame range where each class is visible in an ROI and
+   type its name and instance count. Several classes may be active at once. Press `h` for keys.
+4. **Report:** `python eval_report.py --project projects/hph_hw`
+   Sweeps confidence thresholds offline (no re-inference), writes metric CSVs, a
+   `leaderboard.md`, and the Gantt timeline chart.
+5. **Re-chart only:** `python generate_eval_gantt.py --project projects/hph_hw --video test1 --roi tray --conf 0.4`
+
+**What the metrics mean**
+- *Frame level* — per-class precision/recall/F1 where each frame is a multiset of instances, so
+  predicting one screen where you labeled two is penalized. Plus a confusion matrix.
+- *Segment level* — temporal-IoU-matched F1 at 0.1/0.25/0.5, matched per class, plus an edit
+  score over the start-ordered sequence of class tokens ("did it see the right sequence of steps").
+- *Timing* — onset latency to the first stable detection, and flicker (raw fragments per GT
+  segment; 1.0 is perfect). Both are the most actionable numbers for tuning `conf`.
+- *Counting* — MAE against the instance counts you typed while labeling.
+
+**Reading the chart** — one row per model plus a GT row, one lane per class within each row.
+Color identifies the class; a washed-out bar means the model was less confident over that run.
+
+> `projects/` is gitignored **except** `config.json`, `classes.txt` and `gt/*.json`, so your
+> hand-labeled ground truth survives a clean checkout while caches and reports stay local.
+
 ---
 
 ## 📂 Script Reference
@@ -61,8 +94,16 @@ Organize, expand, and train on your labeled data.
 ### 🏎️ Training (`train_`)
 - `train_yolo.py`: Trains or fine-tunes a YOLO model using Ultralytics.
 
+### 📏 Evaluation (`eval_`)
+- `eval_init_project.py`: Scaffolds `projects/<name>/` and seeds `classes.txt` + `config.json`.
+- `eval_label_timeline.py`: Interactive OpenCV tool for labeling temporal ground truth inside ROIs.
+- `eval_run_detect.py`: Caches every raw detection per model × video so confidence can be swept offline.
+- `eval_report.py`: Scores the cache against ground truth; writes metric CSVs and `leaderboard.md`.
+- `eval_common.py`: Shared library (config/GT/cache IO, ROI filter, segment math). Not run directly.
+
 ### 📈 Analysis / Visualization (`generate_`)
-- `generate_plotly_chart.py`: Builds an interactive Plotly timeline (Gantt-style) of detected classes per frame, comparing model output against ground truth.
+- `generate_eval_gantt.py`: Gantt timeline of predictions vs ground truth, dimmed by confidence. Driven by `eval_report.py`, or run standalone to re-render.
+- `generate_plotly_chart.py`: Mock-data layout demo for the original single-label Gantt style. Not wired to real inference — use `generate_eval_gantt.py` for that.
 
 ---
 
@@ -72,4 +113,6 @@ Organize, expand, and train on your labeled data.
 - Ultralytics (YOLO)
 - Albumentations
 - Plotly & pandas (for analysis/visualization)
+- Kaleido (optional — only for PNG export of eval charts; the HTML always works).
+  Plotly 6.x needs `pip install -U kaleido`; Plotly 5.x needs `pip install kaleido==0.2.1`.
 - FFmpeg (for video processing)

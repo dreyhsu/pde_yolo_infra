@@ -13,3 +13,18 @@ clip/
 video/
 # transfer/ is tracked in full, including .csv (overrides rules above)
 !transfer/**
+
+# eval projects: ignore the bulky detection caches and generated reports, but
+# keep the hand-labeled ground truth -- it is the most expensive artifact here
+# and would otherwise be lost to a clean checkout.
+# Note: this must ignore projects/** rather than projects/, because git cannot
+# re-include a file whose parent directory is itself excluded.
+projects/**
+!projects/*/
+!projects/*/config.json
+!projects/*/classes.txt
+!projects/*/gt/
+!projects/*/gt/*.json
+
+__pycache__/
+*.pyc
