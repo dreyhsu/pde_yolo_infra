@@ -5,14 +5,14 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 if __name__ == '__main__':
     # Load the exported model.
     # model = YOLO(r"D:\Dre\NK_PDE\logs\0919_dino\0919\exported_models\exported_last.pt")
-    model = YOLO(r"yolo11n.pt")
+    model = YOLO(r"yolo26s.pt")
 
     # Fine-tune with ultralytics.
     # model.train(data=r"D:\Dre\NK_PDE\yolo_dataset\0108_180\data.yaml", epochs=300, project="logs/0109_pt", name="pt_yolo11s_0109_2", workers=0, device='cuda', patience=20)
     model.train(
         data=r"D:\Dre\PDE_yolo_infra\train_dataset\hph_packing_merged_aug\data.yaml",
         project="logs/hph_hw",
-        name="yolo11n",
+        name="yolo26s",
         
         # --- Core Training Params ---
         epochs=500,

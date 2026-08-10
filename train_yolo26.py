@@ -42,12 +42,12 @@ import os
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 if __name__ == '__main__':
-    model = YOLO(r"yolo26s.pt")
+    model = YOLO(r"yolo26n.pt")
 
     model.train(
         data=r"D:\Dre\PDE_yolo_infra\train_dataset\hph_packing_merged_aug\data.yaml",
         project="logs/hph_hw",
-        name="yolo26s",
+        name="yolo26n",
 
         # --- Core training params ---
         epochs=150,       # was 500. 1500 images fine-tuning from COCO weights does not

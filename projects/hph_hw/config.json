@@ -29,10 +29,10 @@
     "seg_f1_025": 0.5
   },
   "screen_qc": {
-  "enabled": true,
-  "class": "screeninbox",
-  "min_conf": 0.25,
-  "thresholds": {}
+    "enabled": true,
+    "class": "screeninbox",
+    "min_conf": 0.25,
+    "thresholds": {}
   },
   "class_alias": {},
   "models": [
@@ -51,7 +51,16 @@
     {
       "name": "yolo11s_all",
       "weights": "D:/Dre/PDE_yolo_infra/logs/hph_hw/pt_yolo_precision_run/weights/best.pt"
+    },
+    {
+      "name": "yolo26n_all",
+      "weights": "D:/Dre/PDE_yolo_infra/logs/hph_hw/yolo26n6/weights/best.pt"
+    },
+    {
+      "name": "yolo26s_all",
+      "weights": "D:/Dre/PDE_yolo_infra/logs/hph_hw/yolo26s5/weights/best.pt"
     }
+    
   ],
   "videos": [
     {
