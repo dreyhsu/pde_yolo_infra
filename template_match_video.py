@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Run ROI-limited OpenCV template matching and tenon measurement on video.
+"""Compare OK and NG templates inside saved video ROIs.
 
-The output video contains the best-match bounding box and confidence score on
-every frame. Matching is performed only inside regions loaded from
-``saved_rois.txt``. Accepted matches are cropped and measured with the tenon
-detector in ``transfer/measure_tenon_area.py``.
+The output video contains the winning template's bounding box plus both
+confidence scores. Matching is performed only inside regions loaded from
+``saved_rois.txt``. A frame is REAL OK only when its OK confidence passes the
+threshold and is greater than its NG confidence.
 
 Example:
-    conda run -n tf python template_match_video.py template.png input.mp4 output.mp4
+    conda run -n tf python template_match_video.py \
+        ok.png ng.png input.mp4 output.mp4
 """
 
 from __future__ import annotations
@@ -19,25 +20,23 @@ from pathlib import Path
 
 try:
     import cv2
-    import numpy as np
 except ImportError:
     print(
-        "OpenCV and NumPy are required in this Python environment. "
-        "Install them with: python3 -m pip install opencv-python numpy",
+        "OpenCV is required in this Python environment. "
+        "Install it with: python3 -m pip install opencv-python",
         file=sys.stderr,
     )
     raise SystemExit(1)
-
-from transfer.measure_tenon_area import detect_tenon_polygon
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Match one template in every video frame and save an annotated video."
+            "Compare OK and NG templates in every video frame and save annotations."
         )
     )
-    parser.add_argument("template", type=Path, help="Path to the template image")
+    parser.add_argument("ok_template", type=Path, help="Path to the OK template image")
+    parser.add_argument("ng_template", type=Path, help="Path to the NG template image")
     parser.add_argument("video", type=Path, help="Path to the input video")
     parser.add_argument("output", type=Path, help="Path to the output video")
     parser.add_argument(
@@ -152,22 +151,20 @@ def add_label(
     frame,
     top_left: tuple[int, int],
     template_size: tuple[int, int],
-    confidence: float,
+    ok_confidence: float,
+    ng_confidence: float,
     threshold: float,
-    tenon_area: float | None,
-    measurement_error: str | None,
 ) -> None:
-    """Draw the best-match rectangle, confidence, and tenon measurement."""
+    """Draw the winning box and the OK/NG decision with both scores."""
     x, y = top_left
     template_width, template_height = template_size
-    accepted = confidence >= threshold
-    color = (0, 200, 0) if accepted else (0, 0, 255)
-    status = "MATCH" if accepted else "LOW"
-    labels = [f"{status}  confidence: {confidence:.3f}"]
-    if tenon_area is not None:
-        labels.append(f"tenon area: {tenon_area:.2f} px^2")
-    elif accepted and measurement_error:
-        labels.append("tenon area: unavailable")
+    real_ok = ok_confidence > threshold and ok_confidence > ng_confidence
+    color = (0, 200, 0) if real_ok else (0, 0, 255)
+    status = "REAL OK" if real_ok else "NG"
+    labels = [
+        f"{status}  OK: {ok_confidence:.3f}",
+        f"NG: {ng_confidence:.3f}  threshold: {threshold:.3f}",
+    ]
 
     cv2.rectangle(
         frame,
@@ -216,8 +213,11 @@ def add_label(
 
 
 def process_video(args: argparse.Namespace) -> int:
-    if not args.template.is_file():
-        print(f"Error: template not found: {args.template}", file=sys.stderr)
+    if not args.ok_template.is_file():
+        print(f"Error: OK template not found: {args.ok_template}", file=sys.stderr)
+        return 1
+    if not args.ng_template.is_file():
+        print(f"Error: NG template not found: {args.ng_template}", file=sys.stderr)
         return 1
     if not args.video.is_file():
         print(f"Error: video not found: {args.video}", file=sys.stderr)
@@ -229,12 +229,18 @@ def process_video(args: argparse.Namespace) -> int:
         print("Error: --threshold must be between 0 and 1", file=sys.stderr)
         return 1
 
-    template = cv2.imread(str(args.template), cv2.IMREAD_COLOR)
-    if template is None:
-        print(f"Error: could not read template: {args.template}", file=sys.stderr)
+    ok_template = cv2.imread(str(args.ok_template), cv2.IMREAD_COLOR)
+    if ok_template is None:
+        print(f"Error: could not read OK template: {args.ok_template}", file=sys.stderr)
         return 1
-    template_gray = cv2.cvtColor(template, cv2.COLOR_BGR2GRAY)
-    template_height, template_width = template_gray.shape
+    ng_template = cv2.imread(str(args.ng_template), cv2.IMREAD_COLOR)
+    if ng_template is None:
+        print(f"Error: could not read NG template: {args.ng_template}", file=sys.stderr)
+        return 1
+    ok_template_gray = cv2.cvtColor(ok_template, cv2.COLOR_BGR2GRAY)
+    ng_template_gray = cv2.cvtColor(ng_template, cv2.COLOR_BGR2GRAY)
+    ok_template_height, ok_template_width = ok_template_gray.shape
+    ng_template_height, ng_template_width = ng_template_gray.shape
 
     capture = cv2.VideoCapture(str(args.video))
     if not capture.isOpened():
@@ -247,11 +253,14 @@ def process_video(args: argparse.Namespace) -> int:
     if fps <= 0:
         fps = 30.0
 
-    if template_width > frame_width or template_height > frame_height:
+    largest_template_width = max(ok_template_width, ng_template_width)
+    largest_template_height = max(ok_template_height, ng_template_height)
+    if largest_template_width > frame_width or largest_template_height > frame_height:
         capture.release()
         print(
-            "Error: template is larger than the video frame "
-            f"({template_width}x{template_height} vs {frame_width}x{frame_height})",
+            "Error: a template is larger than the video frame "
+            f"(largest is {largest_template_width}x{largest_template_height}; "
+            f"frame is {frame_width}x{frame_height})",
             file=sys.stderr,
         )
         return 1
@@ -260,7 +269,7 @@ def process_video(args: argparse.Namespace) -> int:
         rois = load_rois(
             args.roi_file,
             (frame_width, frame_height),
-            (template_width, template_height),
+            (largest_template_width, largest_template_height),
         )
     except ValueError as error:
         capture.release()
@@ -281,11 +290,17 @@ def process_video(args: argparse.Namespace) -> int:
 
     total_frames = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
     frame_number = 0
-    accepted_count = 0
-    measured_count = 0
-    measurement_failure_count = 0
+    real_ok_count = 0
+    ng_count = 0
 
-    print(f"Template: {args.template} ({template_width}x{template_height})")
+    print(
+        f"OK template: {args.ok_template} "
+        f"({ok_template_width}x{ok_template_height})"
+    )
+    print(
+        f"NG template: {args.ng_template} "
+        f"({ng_template_width}x{ng_template_height})"
+    )
     print(f"Video:    {args.video} ({frame_width}x{frame_height}, {fps:.2f} fps)")
     print(f"Output:   {args.output}")
     print(f"ROI file: {args.roi_file} ({len(rois)} valid region(s))")
@@ -298,8 +313,11 @@ def process_video(args: argparse.Namespace) -> int:
                 break
 
             frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            confidence, top_left = find_best_roi_match(
-                frame_gray, template_gray, rois
+            ok_confidence, ok_top_left = find_best_roi_match(
+                frame_gray, ok_template_gray, rois
+            )
+            ng_confidence, ng_top_left = find_best_roi_match(
+                frame_gray, ng_template_gray, rois
             )
 
             for roi_x, roi_y, roi_width, roi_height in rois:
@@ -311,42 +329,29 @@ def process_video(args: argparse.Namespace) -> int:
                     1,
                 )
 
-            tenon_area = None
-            measurement_error = None
-            if confidence >= args.threshold:
-                accepted_count += 1
-                match_x, match_y = top_left
-                matched_crop = frame[
-                    match_y : match_y + template_height,
-                    match_x : match_x + template_width,
-                ].copy()
-                try:
-                    tenon_polygon = detect_tenon_polygon(matched_crop)
-                    tenon_area = float(cv2.contourArea(tenon_polygon))
-                    measured_count += 1
+            real_ok = (
+                ok_confidence > args.threshold and ok_confidence > ng_confidence
+            )
+            if real_ok:
+                real_ok_count += 1
+                top_left = ok_top_left
+                winning_size = (ok_template_width, ok_template_height)
+            else:
+                ng_count += 1
+                if ng_confidence >= ok_confidence:
+                    top_left = ng_top_left
+                    winning_size = (ng_template_width, ng_template_height)
+                else:
+                    top_left = ok_top_left
+                    winning_size = (ok_template_width, ok_template_height)
 
-                    full_frame_polygon = np.rint(tenon_polygon).astype(np.int32)
-                    full_frame_polygon[:, 0] += match_x
-                    full_frame_polygon[:, 1] += match_y
-                    cv2.polylines(
-                        frame,
-                        [full_frame_polygon],
-                        True,
-                        (0, 215, 255),
-                        2,
-                        cv2.LINE_AA,
-                    )
-                except ValueError as error:
-                    measurement_error = str(error)
-                    measurement_failure_count += 1
             add_label(
                 frame,
                 top_left,
-                (template_width, template_height),
-                confidence,
+                winning_size,
+                ok_confidence,
+                ng_confidence,
                 args.threshold,
-                tenon_area,
-                measurement_error,
             )
             writer.write(frame)
             frame_number += 1
@@ -371,12 +376,9 @@ def process_video(args: argparse.Namespace) -> int:
         return 1
 
     print(
-        f"\nDone: {frame_number} frames, {accepted_count} accepted matches "
-        f"({accepted_count / frame_number:.1%})."
-    )
-    print(
-        f"Tenon area measured on {measured_count} frame(s); "
-        f"{measurement_failure_count} measurement failure(s)."
+        f"\nDone: {frame_number} frames, {real_ok_count} REAL OK "
+        f"({real_ok_count / frame_number:.1%}), {ng_count} NG "
+        f"({ng_count / frame_number:.1%})."
     )
     print(f"Saved annotated video to: {args.output}")
     print("Note: the OpenCV output contains video only; source audio is not copied.")
