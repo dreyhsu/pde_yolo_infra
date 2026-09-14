@@ -66,9 +66,10 @@ Color identifies the class; a washed-out bar means the model was less confident 
 > `projects/` is gitignored **except** `config.json`, `classes.txt` and `gt/*.json`, so your
 > hand-labeled ground truth survives a clean checkout while caches and reports stay local.
 
-### 5. OpenCV Template Matching on Video
-Use `template_match_video.py` to find one template image in every frame and create an
-annotated video containing the best-match bounding box and confidence score.
+### 5. OpenCV Template Matching and Tenon Measurement
+Use `template_match_video.py` to find one MCIO-card template in every frame. Matching is
+restricted to the regions in `saved_rois.txt`. For accepted matches, the script crops the
+bounding box, measures the visible tenon area, and creates an annotated output video.
 
 Install OpenCV if it is not already available:
 
@@ -79,8 +80,8 @@ python3 -m pip install opencv-python
 Run the script with a template image, input video, and output video:
 
 ```bash
-python3 template_match_video.py \
-  path/to/template.png \
+conda run -n tf python template_match_video.py \
+  transfer/nk_apl_mcio/images/template.png \
   path/to/input.mp4 \
   path/to/output.mp4 \
   --threshold 0.75
@@ -91,7 +92,10 @@ preview window to stop early.
 
 - Green box (`MATCH`): confidence is at or above the threshold.
 - Red box (`LOW`): the best candidate is below the threshold.
-- A box and confidence score are drawn on every frame.
+- Blue box: ROI loaded from `saved_rois.txt`; template matching searches only inside it.
+- Yellow contour: detected tenon used for area calculation.
+- A box and confidence score are drawn on every frame. Accepted matches also display the
+  tenon area in square pixels.
 - The template should be tightly cropped and approximately the same size and orientation
   as the target in the video.
 - The generated video does not include the source audio.
@@ -112,8 +116,8 @@ preview window to stop early.
 ### 🧠 Inference (`inference_`)
 - `inference_cvat_prelabel.py`: Runs YOLO and exports a ZIP for CVAT's YOLO 1.1 format.
 - `inference_video_test.py`: Runs inference on a video and saves the annotated results.
-- `template_match_video.py`: Runs OpenCV template matching on every video frame and writes
-  the best bounding box and confidence score to an output video.
+- `template_match_video.py`: Runs ROI-limited OpenCV template matching, measures the tenon
+  area for accepted matches, and writes the bounding box, confidence, and area to a video.
 
 ### 📊 Data Management (`data_`)
 - `data_collect_labels.py`: Organizes labels and images into standard YOLO directory structure.

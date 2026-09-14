@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<annotations>
+  <version>1.1</version>
+  <meta>
+    <job>
+      <id>404</id>
+      <size>2</size>
+      <mode>annotation</mode>
+      <overlap>0</overlap>
+      <bugtracker></bugtracker>
+      <created>2026-09-14 06:26:09.132545+00:00</created>
+      <updated>2026-09-14 06:30:57.046463+00:00</updated>
+      <subset>default</subset>
+      <start_frame>0</start_frame>
+      <stop_frame>1</stop_frame>
+      <frame_filter></frame_filter>
+      <segments>
+        <segment>
+          <id>404</id>
+          <start>0</start>
+          <stop>1</stop>
+          <url>http://10.48.125.4:8080/api/jobs/404</url>
+        </segment>
+      </segments>
+      <owner>
+        <username>admin</username>
+        <email></email>
+      </owner>
+      <assignee></assignee>
+      <labels>
+        <label>
+          <name>tenon</name>
+          <color>#b2fa7a</color>
+          <type>any</type>
+          <attributes>
+          </attributes>
+        </label>
+      </labels>
+    </job>
+    <dumped>2026-09-14 06:31:57.469645+00:00</dumped>
+  </meta>
+  <image id="0" name="ng.png" width="104" height="65">
+    <polygon label="tenon" source="manual" occluded="0" points="13.44,43.52;94.94,42.80;94.94,26.53;61.70,27.20;61.80,31.70;46.10,31.70;45.98,27.53;13.72,27.82" z_order="0">
+    </polygon>
+  </image>
+  <image id="1" name="template.png" width="103" height="60">
+    <polygon label="tenon" source="manual" occluded="0" points="10.99,26.67;11.00,38.50;91.63,36.17;91.48,25.09;58.80,25.95;58.70,31.10;42.80,31.30;42.80,26.10" z_order="0">
+    </polygon>
+  </image>
+</annotations>
