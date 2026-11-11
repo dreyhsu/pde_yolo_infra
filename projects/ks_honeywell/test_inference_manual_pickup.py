@@ -123,13 +123,34 @@ class VideoPipelineTests(unittest.TestCase):
         self.assertEqual(self.writer.write.call_count, 12)
         self.assertEqual(self.cv2.VideoWriter.call_args.args[2:], (30.0, (640, 480)))
         self.assertEqual(self.manual_model.predict.call_args.kwargs["device"], "cpu")
-        self.assertEqual(self.manual_model.predict.call_args.kwargs["classes"], [0, 1, 2, 3])
+        self.assertNotIn("classes", self.manual_model.predict.call_args.kwargs)
         self.cap.release.assert_called_once()
         self.writer.release.assert_called_once()
         self.assertTrue(self.cv2.rectangle.called)
         texts = [call.args[1] for call in self.cv2.putText.call_args_list]
         self.assertIn("PICKUP: manual1", texts)
         self.assertTrue(any("manual1: 1 pickups" in text for text in texts))
+
+    def test_all_eleven_classes_are_drawn_but_only_manuals_trigger_pickups(self):
+        names = list(pickup.MANUALS) + [
+            "scanner_with_label", "scanner_without_label", "scanner_in_bag",
+            "box_folded", "scanner_in_box", "battery_in_bag", "label_on_box"]
+        # String IDs match the supplied YAML mapping. Only non-manual boxes
+        # overlap the hand; they must be visible without triggering pickup.
+        self.manual_model.names = {str(index): name for index, name in enumerate(names)}
+        rows = [[50, 50, 60, 60, .9, index] if index < 4
+                else [0, 0, 10, 10, .9, index] for index in range(len(names))]
+        result = self.manual_model.predict.return_value[0]
+        result.boxes.data.cpu.return_value.tolist.return_value = rows
+        states = self.run_video()
+        texts = [call.args[1] for call in self.cv2.putText.call_args_list]
+        for name in names:
+            self.assertIn(f"{name} 0.90", texts)
+        self.assertIn("hand 0.80", texts)
+        self.assertEqual(self.cv2.rectangle.call_count, 12 * 12)
+        self.assertTrue(all(state.count == 0 for state in states.values()))
+        self.assertNotIn("classes", self.manual_model.predict.call_args.kwargs)
+        self.assertFalse(any("PICKUP:" in text for text in texts))
 
     def test_missing_file_and_output_errors(self):
         (self.root / "manual.pt").unlink()

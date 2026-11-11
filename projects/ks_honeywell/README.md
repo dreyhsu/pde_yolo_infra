@@ -2,7 +2,8 @@
 
 Runs a custom **YOLO26m** detector for `manual1`, `manual2`, `manual3`, and
 `manual4`, plus a **YOLOv8n hand detector**, in the same Ultralytics environment.
-The result is an annotated MP4 with manual/hand boxes, confidence, live contact
+The result is an annotated MP4 with boxes for every detected custom-model class
+and hands, confidence, live contact
 status, pickup counts, and a two-second pickup banner. Events and final counts
 are also printed to the terminal. Audio is not copied.
 
@@ -44,7 +45,10 @@ first. Choose a new `OUTPUT` path if a previous output already exists.
 
 Supply your **trained YOLO26m** checkpoint, not the standard COCO `yolo26m.pt`.
 Its class names must include the exact names `manual1` through `manual4`; class
-IDs may be in any order and other classes are ignored.
+IDs may be in any order. All classes from this checkpoint are shown with their
+names and confidence, including `scanner_with_label`, `scanner_without_label`,
+`scanner_in_bag`, `box_folded`, `scanner_in_box`, `battery_in_bag`, and
+`label_on_box`. Only `manual1`–`manual4` participate in pickup detection.
 
 ```sh
 python projects/ks_honeywell/inference_manual_pickup.py --source "video/input.mp4" --manual-weights "logs/ks_honeywell/yolo26m/weights/best.pt" --hand-weights "projects/ks_honeywell/weights/hand_yolov8n.pt" --output "projects/ks_honeywell/output/pickups.mp4" --device 0
@@ -58,6 +62,8 @@ Options: `--imgsz 640`, `--manual-conf 0.25`, `--hand-conf 0.25`,
 `--contact-duration 0.2`, and `--release-duration 0.3`.
 Run with `--help` for all arguments. Set contact duration to `0` for immediate
 pickup on overlap. Increase image size if hands are small (at a speed cost).
+`--manual-conf` applies to all classes from the custom YOLO26m checkpoint;
+`--hand-conf` applies to the separate hand detector.
 
 ## Pickup rule and timing
 

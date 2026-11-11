@@ -1,4 +1,4 @@
-"""Annotate manual/hand detections and contact-based pickup events in an MP4."""
+"""Annotate all object/hand detections and manual pickup events in an MP4."""
 
 import argparse
 from dataclasses import dataclass
@@ -29,7 +29,8 @@ def intersects(a, b):
 def contact_classes(manuals, hands):
     # Detections are (name, confidence, xyxy). Multiple instances share class state.
     return {name for name, _, box in manuals
-            if any(intersects(box, hand_box) for _, _, hand_box in hands)}
+            if name in MANUALS
+            and any(intersects(box, hand_box) for _, _, hand_box in hands)}
 
 
 @dataclass
@@ -73,7 +74,7 @@ def extract_detections(result, class_names=None):
     return detections
 
 
-def draw_frame(cv2, frame, manuals, hands, contacts, states, timestamp):
+def draw_frame(cv2, frame, objects, hands, contacts, states, timestamp):
     height, width = frame.shape[:2]
     scale = max(0.35, min(0.7, width / 1400))
     line_height = max(17, round(30 * scale / 0.7))
@@ -85,7 +86,7 @@ def draw_frame(cv2, frame, manuals, hands, contacts, states, timestamp):
         cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX,
                     scale, color, 1, cv2.LINE_AA)
 
-    for name, confidence, box in manuals + hands:
+    for name, confidence, box in objects + hands:
         color = ((255, 200, 0) if name == "hand" else
                  (0, 165, 255) if name in contacts else (0, 220, 0))
         x1, y1, x2, y2 = [int(value) for value in box]
@@ -151,7 +152,10 @@ def run(args, *, cv2_module=None, model_factory=None):
         for label, model in (("Manual", manual_model), ("Hand", hand_model)):
             if model.task != "detect":
                 raise ValueError(f"{label} checkpoint must be an object detection model")
-        ids = manual_class_ids(manual_model.names)
+        manual_class_ids(manual_model.names)
+        names = manual_model.names
+        items = names.items() if isinstance(names, dict) else enumerate(names)
+        class_names = {int(key): str(value) for key, value in items}
         height, width = frame.shape[:2]
         Path(args.output).parent.mkdir(parents=True, exist_ok=True)
         writer = cv2.VideoWriter(str(args.output), cv2.VideoWriter_fourcc(*"mp4v"),
@@ -165,17 +169,17 @@ def run(args, *, cv2_module=None, model_factory=None):
             if frame.shape[:2] != (height, width):
                 raise ValueError("Source frame dimensions changed during decoding")
             # Both detectors see the unannotated original frame.
-            manuals = extract_detections(manual_model.predict(
-                frame, conf=args.manual_conf, classes=list(ids), **options)[0], ids)
+            objects = extract_detections(manual_model.predict(
+                frame, conf=args.manual_conf, **options)[0], class_names)
             hands = extract_detections(hand_model.predict(
                 frame, conf=args.hand_conf, **options)[0])
             timestamp = frame_index / fps
-            contacts = contact_classes(manuals, hands)
+            contacts = contact_classes(objects, hands)
             for name, state in states.items():
                 if state.update(name in contacts, timestamp,
                                 args.contact_duration, args.release_duration):
                     print(f"{timestamp:.3f}s PICKUP {name} count={state.count}")
-            writer.write(draw_frame(cv2, frame, manuals, hands, contacts, states, timestamp))
+            writer.write(draw_frame(cv2, frame, objects, hands, contacts, states, timestamp))
             frame_index += 1
             if frame_index % 300 == 0:
                 print(f"Processed {frame_index} frames ({frame_index / fps:.1f}s)")
@@ -219,7 +223,8 @@ def build_parser():
     parser.add_argument("--output", required=True, help="New annotated .mp4 file")
     parser.add_argument("--device", default=None, help="Ultralytics device: 0, cpu, mps; default auto")
     parser.add_argument("--imgsz", type=positive_int, default=640)
-    parser.add_argument("--manual-conf", type=confidence, default=0.25)
+    parser.add_argument("--manual-conf", type=confidence, default=0.25,
+                        help="Confidence threshold for all classes in the custom object model")
     parser.add_argument("--hand-conf", type=confidence, default=0.25)
     parser.add_argument("--contact-duration", type=nonnegative_float, default=0.2,
                         help="Continuous overlap seconds before pickup")
