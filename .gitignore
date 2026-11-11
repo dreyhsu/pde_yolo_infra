@@ -29,6 +29,7 @@ projects/**
 !projects/ks_honeywell/*.bat
 !projects/ks_honeywell/README.md
 !projects/ks_honeywell/requirements.txt
+!projects/ks_honeywell/roi.json
 calib/
 __pycache__/
 *.pyc

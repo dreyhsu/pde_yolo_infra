@@ -5,12 +5,103 @@ import io
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import inference_manual_pickup as pickup
 
 
 class PickupLogicTests(unittest.TestCase):
+    def test_hand_memory_assigns_pair_and_matches_single_even_past_image_midpoint(self):
+        hands = [("hand", .8, (10, 20, 110, 220)),
+                 ("hand", .9, (410, 20, 510, 220))]
+        memory = pickup.HandSideMemory()
+        self.assertEqual(memory.update(hands[:1]), [])
+        self.assertEqual(memory.update(list(reversed(hands))),
+                         [("right", .8, hands[0][2]), ("left", .9, hands[1][2])])
+        self.assertEqual(memory.update(hands[1:]), [("left", .9, hands[1][2])])
+        self.assertEqual(memory.update([]), [])
+        self.assertEqual(memory.centers, {"right": (60, 120), "left": (460, 120)})
+        # A lone box around x=300 stays nearest the remembered left hand,
+        # irrespective of the full-frame midpoint and without moving references.
+        lone = [("hand", .7, (280, 20, 320, 220))]
+        self.assertEqual(memory.update(lone), [("left", .7, lone[0][2])])
+        self.assertEqual(memory.centers["left"], (460, 120))
+        # A new two-hand frame refreshes both references.
+        memory.update([("hand", .9, (80, 0, 120, 40)),
+                       ("hand", .8, (180, 0, 220, 40))])
+        self.assertEqual(memory.centers, {"right": (100, 20), "left": (200, 20)})
+        invalid = [("hand", .9, (20, 20, 10, 30)),
+                   ("hand", .9, (10, 20, float("nan"), 30))]
+        self.assertEqual(memory.update(invalid), [])
+
+    def test_hand_contact_quadrants_are_equal_quarters(self):
+        box = (10, 20, 110, 220)
+        self.assertEqual(pickup.hand_contact_quadrant(box, "right"), (60, 120, 110, 220))
+        self.assertEqual(pickup.hand_contact_quadrant(box, "left"), (10, 120, 60, 220))
+        # Contact outside the chosen quarter must not qualify even when the
+        # full hand box overlaps the manual.
+        right_zone = pickup.hand_contact_quadrant(box, "right")
+        self.assertFalse(pickup.intersects(right_zone, (10, 20, 50, 100)))
+        self.assertFalse(pickup.intersects(right_zone, (10, 130, 50, 200)))
+        self.assertFalse(pickup.intersects(right_zone, (110, 130, 120, 200)))
+        self.assertTrue(pickup.intersects(right_zone, (100, 200, 120, 230)))
+        with self.assertRaisesRegex(ValueError, "Unknown handedness"):
+            pickup.hand_contact_quadrant(box, "unknown")
+
+    def test_landmark_adapter_converts_rgb_and_uses_monotonic_milliseconds(self):
+        # Exercise the adapter without importing the optional ML libraries.
+        adapter = pickup.IndexFingerLandmarker.__new__(pickup.IndexFingerLandmarker)
+        adapter.mp = MagicMock()
+        adapter.cv2 = MagicMock()
+        adapter.model = MagicMock()
+        adapter.model.detect_for_video.return_value = SimpleNamespace(hand_landmarks=[])
+        adapter.last_timestamp_ms = -1
+        frame = MagicMock()
+        frame.shape = (480, 640, 3)
+        for timestamp in [0, .0001, .0002, .0333]:
+            self.assertEqual(adapter.detect(frame, timestamp), [])
+        self.assertEqual([call.args[1] for call in adapter.model.detect_for_video.call_args_list],
+                         [0, 1, 2, 33])
+        adapter.cv2.cvtColor.assert_called_with(frame, adapter.cv2.COLOR_BGR2RGB)
+        adapter.mp.Image.assert_called_with(image_format=adapter.mp.ImageFormat.SRGB,
+                                            data=adapter.cv2.cvtColor.return_value)
+        adapter.close()
+        adapter.model.close.assert_called_once()
+
+    def test_index_tip_inside_boundary_and_outside(self):
+        objects = [(name, .9, (0, 0, 10, 10)) for name in pickup.MANUALS]
+        objects.append(("scanner_in_box", .9, (20, 20, 30, 30)))
+        for tip in [(5, 5), (0, 0), (10, 10)]:
+            self.assertEqual(pickup.fingertip_contacts(objects, [tip]), set(pickup.MANUALS))
+        for tips in [[], [(11, 5)], [(25, 25)], [(float("nan"), 5)], [(5, float("inf"))]]:
+            self.assertEqual(pickup.fingertip_contacts(objects, tips), set())
+
+    def test_landmarks_map_to_original_pixels_and_skip_invalid_tips(self):
+        hand = [SimpleNamespace(x=.5, y=.25) for _ in range(21)]
+        result = SimpleNamespace(hand_landmarks=[hand, hand[:8]])
+        self.assertEqual(pickup.pixel_landmarks(result, 640, 480)[0][8], (320, 120))
+        hand[8] = SimpleNamespace(x=1.1, y=.25)
+        self.assertEqual(pickup.pixel_landmarks(result, 640, 480), [])
+        hand[8] = SimpleNamespace(x=float("nan"), y=.25)
+        self.assertEqual(pickup.pixel_landmarks(result, 640, 480), [])
+
+    def test_remembers_four_manual_classes_and_refreshes_without_old_trails(self):
+        memory = pickup.ManualBoxMemory()
+        self.assertEqual(memory.update([]), ([], set()))
+        objects = [(name, .9, (0, 0, 10, 10)) for name in pickup.MANUALS]
+        memory.update(objects + [("scanner_in_box", .9, (20, 20, 30, 30))])
+        cached, remembered = memory.update([])
+        self.assertEqual(cached, objects)
+        self.assertEqual(remembered, set(pickup.MANUALS))
+        moved = ("manual1", .95, (50, 50, 60, 60))
+        current, remembered = memory.update([moved])
+        self.assertEqual(len(current), 4)
+        self.assertEqual(remembered, {"manual2", "manual3", "manual4"})
+        cached, _ = memory.update([])
+        self.assertIn(moved, cached)
+        self.assertNotIn(objects[0], cached)
+
     def test_overlap_requires_positive_area(self):
         box = (0, 0, 10, 10)
         self.assertFalse(pickup.intersects(box, (20, 0, 30, 10)))
@@ -91,7 +182,13 @@ class VideoPipelineTests(unittest.TestCase):
             "--source", str(self.root / "input.mp4"),
             "--manual-weights", str(self.root / "manual.pt"),
             "--hand-weights", str(self.root / "hand.pt"),
-            "--output", str(self.root / "out.mp4"), "--device", "cpu"])
+            "--output", str(self.root / "out.mp4"), "--device", "cpu",
+            "--contact-mode", "hand-box"])
+        self.args.landmark_model = str(self.root / "hand_landmarker.task")
+        Path(self.args.landmark_model).touch()
+        self.landmarker = MagicMock()
+        self.landmarker.detect.return_value = [[(5, 5)] * 21]
+        self.landmark_factory = MagicMock(return_value=self.landmarker)
         self.cv2 = MagicMock()
         self.cap = self.cv2.VideoCapture.return_value
         self.cap.isOpened.return_value = True
@@ -113,7 +210,134 @@ class VideoPipelineTests(unittest.TestCase):
 
     def run_video(self):
         with redirect_stdout(io.StringIO()):
-            return pickup.run(self.args, cv2_module=self.cv2, model_factory=self.factory)
+            return pickup.run(self.args, cv2_module=self.cv2, model_factory=self.factory,
+                              landmark_factory=self.landmark_factory)
+
+    def test_quadrant_touch_uses_memory_without_landmark_model(self):
+        self.args.contact_mode = "hand-quadrant"
+        Path(self.args.landmark_model).unlink()
+        visible = self.manual_model.predict.return_value[0]
+        hidden = SimpleNamespace(boxes=None)
+        self.manual_model.predict.side_effect = [[visible]] + [[hidden]] * 11
+        # Initialize with two hands; the rightmost box is the left hand, even
+        # though both are near the image-left edge. Then only that hand remains.
+        single = self.hand_model.predict.return_value[0]
+        pair = MagicMock()
+        pair.boxes.data.cpu.return_value.tolist.return_value = [
+            [0, 0, 1, 1, .9, 0], [2, 2, 8, 8, .8, 0]]
+        self.hand_model.predict.side_effect = [[pair]] + [[single]] * 11
+        states = self.run_video()
+        self.assertEqual(states["manual1"].count, 1)
+        self.landmark_factory.assert_not_called()
+        texts = [call.args[1] for call in self.cv2.putText.call_args_list]
+        self.assertIn("LEFT HAND ZONE", texts)
+        self.assertIn("TOUCH: manual1", texts)
+        self.assertIn("manual1 0.90 CONTACT REMEMBERED", texts)
+        self.assertIn("manual1: 1 touches | CONTACT", texts)
+        self.assertEqual(self.cv2.line.call_count, 13 * 2)
+        # Full hand (2,2,8,8) is divided into quarters; only lower-left is active.
+        self.assertTrue(any(call.args[1:3] == ((2, 5), (5, 8))
+                            for call in self.cv2.rectangle.call_args_list))
+
+    def test_whole_hand_overlap_outside_selected_quarter_is_not_contact(self):
+        self.args.contact_mode = "hand-quadrant"
+        # Image-left hand is right hand: lower-right counts, not upper-right.
+        self.manual_model.predict.return_value[0].boxes.data.cpu.return_value.tolist.return_value = [
+            [12, 2, 18, 8, .9, 0]]
+        self.hand_model.predict.return_value[0].boxes.data.cpu.return_value.tolist.return_value = [
+            [0, 0, 20, 20, .8, 0], [100, 100, 120, 120, .9, 0]]
+        states = self.run_video()
+        self.assertEqual(states["manual1"].count, 0)
+        self.landmark_factory.assert_not_called()
+
+    def test_right_hand_uses_lower_right_quarter(self):
+        self.args.contact_mode = "hand-quadrant"
+        self.args.image_left_hand = "right"
+        self.manual_model.predict.return_value[0].boxes.data.cpu.return_value.tolist.return_value = [
+            [12, 12, 18, 18, .9, 0]]
+        self.hand_model.predict.return_value[0].boxes.data.cpu.return_value.tolist.return_value = [
+            [0, 0, 20, 20, .8, 0], [100, 100, 120, 120, .9, 0]]
+        states = self.run_video()
+        self.assertEqual(states["manual1"].count, 1)
+        texts = [call.args[1] for call in self.cv2.putText.call_args_list]
+        self.assertIn("RIGHT HAND ZONE", texts)
+
+    def test_roi_excludes_boxes_but_keeps_them_visible(self):
+        path = self.root / "roi.json"
+        pickup.save_roi(path, (20, 20, 100, 100), 640, 480)
+        self.args.roi = str(path)
+        states = self.run_video()
+        self.assertTrue(all(state.count == 0 for state in states.values()))
+        texts = [call.args[1] for call in self.cv2.putText.call_args_list]
+        self.assertIn("COUNTING ROI", texts)
+        self.assertIn("manual1 0.90", texts)
+        self.assertIn("hand 0.80", texts)
+
+    def test_roi_rejects_partially_outside_hand_even_when_quarter_is_inside(self):
+        self.args.contact_mode = "hand-quadrant"
+        path = self.root / "roi.json"
+        pickup.save_roi(path, (0, 0, 10, 10), 640, 480)
+        self.args.roi = str(path)
+        self.hand_model.predict.return_value[0].boxes.data.cpu.return_value.tolist.return_value = [
+            [-5, -5, 8, 8, .8, 0], [100, 100, 120, 120, .9, 0]]
+        states = self.run_video()
+        self.assertTrue(all(state.count == 0 for state in states.values()))
+
+    def test_roi_allows_fully_contained_boxes(self):
+        path = self.root / "roi.json"
+        pickup.save_roi(path, (0, 0, 10, 10), 640, 480)
+        self.args.roi = str(path)
+        self.assertEqual(self.run_video()["manual1"].count, 1)
+
+    def test_roi_dimension_mismatch_stops_before_models_load(self):
+        path = self.root / "roi.json"
+        pickup.save_roi(path, (0, 0, 10, 10), 1280, 720)
+        self.args.roi = str(path)
+        with self.assertRaisesRegex(ValueError, "dimensions do not match"):
+            self.run_video()
+        self.factory.assert_not_called()
+        self.cap.release.assert_called_once()
+
+    def test_index_tip_touch_continues_through_manual_occlusion(self):
+        self.args.contact_mode = "index-finger"
+        visible = self.manual_model.predict.return_value[0]
+        hidden = SimpleNamespace(boxes=None)
+        self.manual_model.predict.side_effect = [[visible]] + [[hidden]] * 11
+        states = self.run_video()
+        self.assertEqual(states["manual1"].count, 1)
+        self.assertEqual(self.landmarker.detect.call_count, 12)
+        self.assertAlmostEqual(self.landmarker.detect.call_args.args[1], 11 / 30)
+        self.landmarker.close.assert_called_once()
+        texts = [call.args[1] for call in self.cv2.putText.call_args_list]
+        self.assertIn("INDEX TIP", texts)
+        self.assertIn("TOUCH: manual1", texts)
+        self.assertIn("manual1 0.90 CONTACT REMEMBERED", texts)
+        self.assertIn("manual1: 1 touches | CONTACT", texts)
+        self.assertTrue(self.cv2.circle.called)
+
+    def test_hand_overlap_alone_does_not_trigger_index_touch(self):
+        self.args.contact_mode = "index-finger"
+        # First six frames: index outside manual despite hand-box overlap;
+        # remaining frames: no landmarks. Neither case can produce a touch.
+        self.landmarker.detect.side_effect = [[[(25, 25)] * 21]] * 6 + [[]] * 6
+        states = self.run_video()
+        self.assertTrue(all(state.count == 0 for state in states.values()))
+
+    def test_missing_landmark_model_fails_before_inference(self):
+        self.args.contact_mode = "index-finger"
+        Path(self.args.landmark_model).unlink()
+        with self.assertRaisesRegex(ValueError, "Hand landmark model not found"):
+            self.run_video()
+        self.factory.assert_not_called()
+
+    def test_landmark_failure_releases_all_resources(self):
+        self.args.contact_mode = "index-finger"
+        self.landmarker.detect.side_effect = RuntimeError("landmark failed")
+        with self.assertRaisesRegex(RuntimeError, "landmark failed"):
+            self.run_video()
+        self.landmarker.close.assert_called_once()
+        self.cap.release.assert_called_once()
+        self.writer.release.assert_called_once()
 
     def test_pipeline_preserves_fps_dimensions_and_runs_both_models(self):
         states = self.run_video()
