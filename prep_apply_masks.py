@@ -3,10 +3,10 @@ import os
 import glob
 import json
 
-MASK_FILE = 'hph_hw_masks.json'
+MASK_FILE = 'ks_vms_masks.json'
 IMAGE_EXTENSIONS = ['*.jpg', '*.jpeg', '*.png', '*.JPG', '*.JPEG', '*.PNG']
-GLOBAL_OUTPUT_DIR = r'D:\Dre\PDE_yolo_infra\image\masked_hph_hw3'
-ROOT_IMAGE_DIR = r'D:\Dre\PDE_yolo_infra\image\hph_hw3'
+GLOBAL_OUTPUT_DIR = r'D:\Dre\PDE_yolo_infra\image\masked_ks_vms_train_data'
+ROOT_IMAGE_DIR = r'D:\Dre\PDE_yolo_infra\image\ks_vms_train_data'
 
 def save_masks(masks, filename=MASK_FILE):
     with open(filename, 'w') as f:

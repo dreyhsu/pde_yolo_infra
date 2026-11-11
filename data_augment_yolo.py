@@ -274,4 +274,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     main(args)
 
-# --images_dir D:\Dre\PDE_yolo_infra\train_dataset\hph_packing_merged_aug\images --labels_dir D:\Dre\PDE_yolo_infra\train_dataset\hph_packing_merged_aug\labels --output_images D:\Dre\PDE_yolo_infra\train_dataset\hph_packing_merged_aug\images --output_labels D:\Dre\PDE_yolo_infra\train_dataset\hph_packing_merged_aug\labels
+# --images_dir D:\Dre\PDE_yolo_infra\train_dataset\KS_honeywell_002_yolo\images --labels_dir D:\Dre\PDE_yolo_infra\train_dataset\KS_honeywell_002_yolo\labels --output_images D:\Dre\PDE_yolo_infra\train_dataset\KS_honeywell_002_yolo\images --output_labels D:\Dre\PDE_yolo_infra\train_dataset\KS_honeywell_002_yolo\labels
