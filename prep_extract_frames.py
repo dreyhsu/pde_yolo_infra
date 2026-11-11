@@ -4,9 +4,9 @@ import sys
 import ctypes
 
 # --- Configuration ---
-OUTPUT_FOLDER = 'image/hph_hw3'
+OUTPUT_FOLDER = 'image/ks_vms_train_data'
 IMAGE_FORMAT = 'jpg'
-VIDEO_PATH = 'clip/hph_03.mp4'
+VIDEO_PATH = 'clip/ks_vms_01.mp4'
 FRAME_INTERVAL = 5  # Extract every Nth frame (1 = every frame, 3 = every 3rd frame, etc.)
 
 # Global variables for mouse callback

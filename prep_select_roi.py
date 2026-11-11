@@ -2,7 +2,7 @@ import cv2
 import os
 
 # --- Configuration ---
-IMAGE_PATH = os.path.join("images", "cable_1_frame_00076.jpg")
+IMAGE_PATH = os.path.join("image", "ks_vms_train_data", "ks_vms_train_data_frame_00000.jpg")
 OUTPUT_TXT = "saved_rois.txt"
 
 # --- Global Variables ---
