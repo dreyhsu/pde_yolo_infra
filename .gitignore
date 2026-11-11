@@ -25,6 +25,10 @@ projects/**
 !projects/*/classes.txt
 !projects/*/gt/
 !projects/*/gt/*.json
+!projects/ks_honeywell/*.py
+!projects/ks_honeywell/*.bat
+!projects/ks_honeywell/README.md
+!projects/ks_honeywell/requirements.txt
 calib/
 __pycache__/
 *.pyc
