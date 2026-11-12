@@ -163,12 +163,44 @@ class PickupLogicTests(unittest.TestCase):
         self.assertEqual(pickup.contact_classes([], hands), set())
 
     def test_names_are_resolved_independent_of_order(self):
-        names = {0: "other", 1: "manual4", 2: "manual2", 3: "manual1", 4: "manual3"}
-        self.assertEqual(pickup.manual_class_ids(names),
-                         {1: "manual4", 2: "manual2", 3: "manual1", 4: "manual3"})
-        self.assertEqual(pickup.manual_class_ids(list(pickup.MANUALS))[0], "manual1")
-        with self.assertRaisesRegex(ValueError, "manual3, manual4"):
-            pickup.manual_class_ids({0: "manual1", 1: "manual2"})
+        shuffled = list(reversed(pickup.WORKFLOW_STEPS))
+        names = {str(index + 1): name for index, name in enumerate(shuffled)}
+        names[0] = "other"
+        resolved = pickup.workflow_class_ids(names)
+        self.assertEqual(set(resolved.values()), set(pickup.WORKFLOW_STEPS))
+        self.assertEqual(resolved[1], pickup.FINAL_STEP)
+        with self.assertRaisesRegex(ValueError, "label_on_box"):
+            pickup.workflow_class_ids(list(pickup.WORKFLOW_STEPS[:-1]))
+
+    def test_workflow_enforces_order_and_does_not_cache_early_detections(self):
+        workflow = pickup.WorkflowState()
+        second = pickup.ORDERED_STEPS[1]
+        self.assertIsNone(workflow.update_detection({second}, 0.0, 0.2))
+        self.assertIsNone(workflow.update_detection({second}, 1.0, 0.2))
+        self.assertEqual(workflow.status(pickup.ORDERED_STEPS[0]), "CURRENT")
+        self.assertEqual(workflow.status(second), "PENDING")
+
+        first = pickup.ORDERED_STEPS[0]
+        self.assertIsNone(workflow.update_detection({first, second}, 2.0, 0.2))
+        self.assertEqual(workflow.update_detection({first, second}, 2.2, 0.2), first)
+        self.assertIsNone(workflow.update_detection({second}, 2.21, 0.2))
+        self.assertEqual(workflow.update_detection({second}, 2.41, 0.2), second)
+
+    def test_workflow_manuals_are_unordered_and_final_is_last(self):
+        workflow = pickup.WorkflowState()
+        workflow.completed.update(pickup.ORDERED_STEPS)
+        self.assertEqual(workflow.phase, "Pick manuals - any order")
+        self.assertTrue(all(workflow.status(name) == "CURRENT" for name in pickup.MANUALS))
+        self.assertIsNone(workflow.update_detection({pickup.FINAL_STEP}, 0.0, 0.0))
+        self.assertEqual(workflow.accept_manual_events({"manual3", "manual1"}),
+                         ["manual1", "manual3"])
+        self.assertEqual(workflow.accept_manual_events({"manual4", "manual2"}),
+                         ["manual2", "manual4"])
+        self.assertEqual(workflow.phase, "Apply label to box")
+        self.assertEqual(workflow.update_detection({pickup.FINAL_STEP}, 1.0, 0.0),
+                         pickup.FINAL_STEP)
+        self.assertTrue(workflow.complete)
+        self.assertEqual(workflow.completed_count, 11)
 
 
 class VideoPipelineTests(unittest.TestCase):
@@ -183,7 +215,7 @@ class VideoPipelineTests(unittest.TestCase):
             "--manual-weights", str(self.root / "manual.pt"),
             "--hand-weights", str(self.root / "hand.pt"),
             "--output", str(self.root / "out.mp4"), "--device", "cpu",
-            "--contact-mode", "hand-box"])
+            "--contact-mode", "hand-box", "--contact-duration", "0"])
         self.args.landmark_model = str(self.root / "hand_landmarker.task")
         Path(self.args.landmark_model).touch()
         self.landmarker = MagicMock()
@@ -199,12 +231,14 @@ class VideoPipelineTests(unittest.TestCase):
         self.writer = self.cv2.VideoWriter.return_value
         self.writer.isOpened.return_value = True
         self.manual_model = MagicMock(task="detect")
-        self.manual_model.names = dict(enumerate(pickup.MANUALS))
+        self.manual_model.names = dict(enumerate(pickup.WORKFLOW_STEPS))
         self.hand_model = MagicMock(task="detect")
-        for model, row in [(self.manual_model, [0, 0, 10, 10, .9, 0]),
-                           (self.hand_model, [2, 2, 8, 8, .8, 0])]:
+        manual_rows = [[0, 0, 10, 10, .9, index]
+                       for index in range(len(pickup.ORDERED_STEPS) + 1)]
+        for model, rows in [(self.manual_model, manual_rows),
+                            (self.hand_model, [[2, 2, 8, 8, .8, 0]])]:
             result = MagicMock()
-            result.boxes.data.cpu.return_value.tolist.return_value = [row]
+            result.boxes.data.cpu.return_value.tolist.return_value = rows
             model.predict.return_value = [result]
         self.factory = MagicMock(side_effect=[self.manual_model, self.hand_model])
 
@@ -213,12 +247,19 @@ class VideoPipelineTests(unittest.TestCase):
             return pickup.run(self.args, cv2_module=self.cv2, model_factory=self.factory,
                               landmark_factory=self.landmark_factory)
 
+    def rows_with_manual1(self, box):
+        rows = [[0, 0, 10, 10, .9, index]
+                for index in range(len(pickup.ORDERED_STEPS))]
+        manual_id = pickup.WORKFLOW_STEPS.index("manual1")
+        rows.append([*box, .9, manual_id])
+        return rows
+
     def test_quadrant_touch_uses_memory_without_landmark_model(self):
         self.args.contact_mode = "hand-quadrant"
         Path(self.args.landmark_model).unlink()
         visible = self.manual_model.predict.return_value[0]
         hidden = SimpleNamespace(boxes=None)
-        self.manual_model.predict.side_effect = [[visible]] + [[hidden]] * 11
+        self.manual_model.predict.side_effect = [[visible]] * 6 + [[hidden]] * 6
         # Initialize with two hands; the rightmost box is the left hand, even
         # though both are near the image-left edge. Then only that hand remains.
         single = self.hand_model.predict.return_value[0]
@@ -233,8 +274,8 @@ class VideoPipelineTests(unittest.TestCase):
         self.assertIn("LEFT HAND ZONE", texts)
         self.assertIn("TOUCH: manual1", texts)
         self.assertIn("manual1 0.90 CONTACT REMEMBERED", texts)
-        self.assertIn("manual1: 1 touches | CONTACT", texts)
-        self.assertEqual(self.cv2.line.call_count, 13 * 2)
+        self.assertNotIn("hand 0.80", texts)
+        self.assertEqual(self.cv2.line.call_count, 0)
         # Full hand (2,2,8,8) is divided into quarters; only lower-left is active.
         self.assertTrue(any(call.args[1:3] == ((2, 5), (5, 8))
                             for call in self.cv2.rectangle.call_args_list))
@@ -242,8 +283,8 @@ class VideoPipelineTests(unittest.TestCase):
     def test_whole_hand_overlap_outside_selected_quarter_is_not_contact(self):
         self.args.contact_mode = "hand-quadrant"
         # Image-left hand is right hand: lower-right counts, not upper-right.
-        self.manual_model.predict.return_value[0].boxes.data.cpu.return_value.tolist.return_value = [
-            [12, 2, 18, 8, .9, 0]]
+        self.manual_model.predict.return_value[0].boxes.data.cpu.return_value.tolist.return_value = \
+            self.rows_with_manual1((12, 2, 18, 8))
         self.hand_model.predict.return_value[0].boxes.data.cpu.return_value.tolist.return_value = [
             [0, 0, 20, 20, .8, 0], [100, 100, 120, 120, .9, 0]]
         states = self.run_video()
@@ -253,8 +294,8 @@ class VideoPipelineTests(unittest.TestCase):
     def test_right_hand_uses_lower_right_quarter(self):
         self.args.contact_mode = "hand-quadrant"
         self.args.image_left_hand = "right"
-        self.manual_model.predict.return_value[0].boxes.data.cpu.return_value.tolist.return_value = [
-            [12, 12, 18, 18, .9, 0]]
+        self.manual_model.predict.return_value[0].boxes.data.cpu.return_value.tolist.return_value = \
+            self.rows_with_manual1((12, 12, 18, 18))
         self.hand_model.predict.return_value[0].boxes.data.cpu.return_value.tolist.return_value = [
             [0, 0, 20, 20, .8, 0], [100, 100, 120, 120, .9, 0]]
         states = self.run_video()
@@ -271,7 +312,7 @@ class VideoPipelineTests(unittest.TestCase):
         texts = [call.args[1] for call in self.cv2.putText.call_args_list]
         self.assertIn("COUNTING ROI", texts)
         self.assertIn("manual1 0.90", texts)
-        self.assertIn("hand 0.80", texts)
+        self.assertNotIn("hand 0.80", texts)
 
     def test_roi_rejects_partially_outside_hand_even_when_quarter_is_inside(self):
         self.args.contact_mode = "hand-quadrant"
@@ -302,7 +343,7 @@ class VideoPipelineTests(unittest.TestCase):
         self.args.contact_mode = "index-finger"
         visible = self.manual_model.predict.return_value[0]
         hidden = SimpleNamespace(boxes=None)
-        self.manual_model.predict.side_effect = [[visible]] + [[hidden]] * 11
+        self.manual_model.predict.side_effect = [[visible]] * 6 + [[hidden]] * 6
         states = self.run_video()
         self.assertEqual(states["manual1"].count, 1)
         self.assertEqual(self.landmarker.detect.call_count, 12)
@@ -312,7 +353,6 @@ class VideoPipelineTests(unittest.TestCase):
         self.assertIn("INDEX TIP", texts)
         self.assertIn("TOUCH: manual1", texts)
         self.assertIn("manual1 0.90 CONTACT REMEMBERED", texts)
-        self.assertIn("manual1: 1 touches | CONTACT", texts)
         self.assertTrue(self.cv2.circle.called)
 
     def test_hand_overlap_alone_does_not_trigger_index_touch(self):
@@ -353,7 +393,8 @@ class VideoPipelineTests(unittest.TestCase):
         self.assertTrue(self.cv2.rectangle.called)
         texts = [call.args[1] for call in self.cv2.putText.call_args_list]
         self.assertIn("PICKUP: manual1", texts)
-        self.assertTrue(any("manual1: 1 pickups" in text for text in texts))
+        self.assertIn("WORKFLOW", texts)
+        self.assertNotIn("hand 0.80", texts)
 
     def test_all_eleven_classes_are_drawn_but_only_manuals_trigger_pickups(self):
         names = list(pickup.MANUALS) + [
@@ -370,8 +411,7 @@ class VideoPipelineTests(unittest.TestCase):
         texts = [call.args[1] for call in self.cv2.putText.call_args_list]
         for name in names:
             self.assertIn(f"{name} 0.90", texts)
-        self.assertIn("hand 0.80", texts)
-        self.assertEqual(self.cv2.rectangle.call_count, 12 * 12)
+        self.assertNotIn("hand 0.80", texts)
         self.assertTrue(all(state.count == 0 for state in states.values()))
         self.assertNotIn("classes", self.manual_model.predict.call_args.kwargs)
         self.assertFalse(any("PICKUP:" in text for text in texts))

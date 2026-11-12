@@ -1,4 +1,4 @@
-"""Annotate all object/hand detections and manual pickup events in an MP4."""
+"""Annotate an ordered assembly workflow and manual pickup events in an MP4."""
 
 import argparse
 from dataclasses import dataclass
@@ -9,7 +9,24 @@ import sys
 
 
 MANUALS = ("manual1", "manual2", "manual3", "manual4")
+ORDERED_STEPS = (
+    "scanner_with_label",
+    "scanner_without_label",
+    "scanner_in_bag",
+    "box_folded",
+    "scanner_in_box",
+    "battery_in_bag",
+)
+FINAL_STEP = "label_on_box"
+WORKFLOW_STEPS = ORDERED_STEPS + MANUALS + (FINAL_STEP,)
+STEP_LABELS = {name: name.replace("_", " ").title() for name in WORKFLOW_STEPS}
 INDEX_TIP = 8
+
+PANEL_BG = (9, 15, 26)
+WHITE = (255, 242, 235)
+MUTED = (189, 163, 145)
+GREEN = (138, 212, 54)
+AMBER = (84, 196, 245)
 
 
 def hand_contact_quadrant(box, handedness):
@@ -166,14 +183,18 @@ class IndexFingerLandmarker:
         self.model.close()
 
 
-def manual_class_ids(names):
-    """Resolve names rather than assuming checkpoint class order."""
+def workflow_class_ids(names):
+    """Resolve workflow names rather than assuming checkpoint class order."""
     items = names.items() if isinstance(names, dict) else enumerate(names)
-    ids = {int(key): str(value) for key, value in items if value in MANUALS}
-    missing = set(MANUALS) - set(ids.values())
+    ids = {int(key): str(value) for key, value in items if value in WORKFLOW_STEPS}
+    missing = set(WORKFLOW_STEPS) - set(ids.values())
     if missing:
-        raise ValueError(f"Manual checkpoint missing classes: {', '.join(sorted(missing))}")
+        raise ValueError(f"Workflow checkpoint missing classes: {', '.join(sorted(missing))}")
     return ids
+
+
+# Backward-compatible helper name for callers that imported it directly.
+manual_class_ids = workflow_class_ids
 
 
 def intersects(a, b):
@@ -217,6 +238,83 @@ class PickupState:
         return False
 
 
+class WorkflowState:
+    """One ordered group, one unordered manual group, then one final step."""
+
+    def __init__(self):
+        self.completed = set()
+        self.detection_target = None
+        self.detection_since = None
+
+    @property
+    def ordered_done(self):
+        return all(name in self.completed for name in ORDERED_STEPS)
+
+    @property
+    def manuals_done(self):
+        return all(name in self.completed for name in MANUALS)
+
+    @property
+    def complete(self):
+        return FINAL_STEP in self.completed
+
+    @property
+    def completed_count(self):
+        return len(self.completed)
+
+    @property
+    def phase(self):
+        if self.complete:
+            return "Workflow complete"
+        if not self.ordered_done:
+            return "Complete ordered steps"
+        if not self.manuals_done:
+            return "Pick manuals - any order"
+        return "Apply label to box"
+
+    def expected_detection(self):
+        if not self.ordered_done:
+            return next(name for name in ORDERED_STEPS if name not in self.completed)
+        if self.manuals_done and not self.complete:
+            return FINAL_STEP
+        return None
+
+    def update_detection(self, visible, timestamp, duration):
+        """Complete only the currently eligible visual step after stable visibility."""
+        target = self.expected_detection()
+        if target != self.detection_target:
+            self.detection_target = target
+            self.detection_since = None
+        if target is None or target not in visible:
+            self.detection_since = None
+            return None
+        if self.detection_since is None:
+            self.detection_since = timestamp
+        if timestamp - self.detection_since + 1e-9 < duration:
+            return None
+        self.completed.add(target)
+        self.detection_target = None
+        self.detection_since = None
+        return target
+
+    def accept_manual_events(self, events):
+        if not self.ordered_done or self.manuals_done:
+            return []
+        newly_completed = [name for name in MANUALS
+                           if name in events and name not in self.completed]
+        self.completed.update(newly_completed)
+        return newly_completed
+
+    def status(self, name):
+        if name in self.completed:
+            return "DONE"
+        if name == self.expected_detection():
+            return "CURRENT"
+        if self.ordered_done and not self.manuals_done and name in MANUALS:
+            return "CURRENT"
+        return "PENDING"
+
+
 def extract_detections(result, class_names=None):
     if result.boxes is None:
         return []
@@ -230,9 +328,59 @@ def extract_detections(result, class_names=None):
     return detections
 
 
+def draw_workflow_panel(cv2, frame, workflow):
+    """Draw the compact, source-style workflow card on the frame's right edge."""
+    height, width = frame.shape[:2]
+    scale = max(0.32, min(1.0, width / 1920, height / 1080))
+    panel_width = min(width - 20, round(600 * scale))
+    row_height = max(18, round(54 * scale))
+    header_height = max(54, round(130 * scale))
+    panel_height = min(height - 20, header_height + row_height * len(WORKFLOW_STEPS) + 8)
+    x, y = width - panel_width - 10, 10
+
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (x, y), (x + panel_width, y + panel_height), PANEL_BG, -1)
+    cv2.addWeighted(overlay, 0.90, frame, 0.10, 0, frame)
+
+    font_scale = max(0.30, 0.72 * scale)
+    thickness = max(1, round(2 * scale))
+
+    def text(value, tx, ty, color=WHITE, size=font_scale):
+        cv2.putText(frame, value, (int(tx), int(ty)), cv2.FONT_HERSHEY_SIMPLEX,
+                    size, color, thickness, cv2.LINE_AA)
+
+    phase_color = GREEN if workflow.complete else AMBER
+    cv2.rectangle(frame, (x, y), (x + max(2, round(4 * scale)), y + panel_height),
+                  phase_color, -1)
+    text("WORKFLOW", x + 12, y + max(18, round(36 * scale)))
+    count_text = f"{workflow.completed_count} / {len(WORKFLOW_STEPS)}"
+    count_x = x + panel_width - max(58, round(92 * scale))
+    text(count_text, count_x, y + max(18, round(36 * scale)), phase_color)
+    text(workflow.phase, x + 12, y + max(39, round(75 * scale)), phase_color,
+         max(0.28, 0.65 * scale))
+
+    rows_y = y + header_height
+    for index, name in enumerate(WORKFLOW_STEPS):
+        top = rows_y + index * row_height
+        if top + row_height > y + panel_height:
+            break
+        status = workflow.status(name)
+        color = GREEN if status == "DONE" else AMBER if status == "CURRENT" else MUTED
+        if status == "CURRENT":
+            row_overlay = frame.copy()
+            cv2.rectangle(row_overlay, (x + 6, top),
+                          (x + panel_width - 6, top + row_height), (26, 43, 51), -1)
+            cv2.addWeighted(row_overlay, 0.90, frame, 0.10, 0, frame)
+        baseline = top + max(14, round(35 * scale))
+        marker = "OK" if status == "DONE" else f"{index + 1:02}"
+        text(marker, x + 12, baseline, color, max(0.28, 0.64 * scale))
+        text(STEP_LABELS[name], x + max(42, round(84 * scale)), baseline,
+             color, max(0.27, 0.61 * scale))
+
+
 def draw_frame(cv2, frame, objects, hands, contacts, states, timestamp,
-               landmarks=(), contact_mode="hand-box", remembered=(), contact_regions=(),
-               roi=None):
+               workflow=None, landmarks=(), contact_mode="hand-box", remembered=(),
+               contact_regions=(), roi=None):
     height, width = frame.shape[:2]
     scale = max(0.35, min(0.7, width / 1400))
     line_height = max(17, round(30 * scale / 0.7))
@@ -244,9 +392,10 @@ def draw_frame(cv2, frame, objects, hands, contacts, states, timestamp,
         cv2.putText(frame, text, (x, y), cv2.FONT_HERSHEY_SIMPLEX,
                     scale, color, 1, cv2.LINE_AA)
 
-    for name, confidence, box in objects + hands:
-        color = ((255, 200, 0) if name == "hand" else
-                 (0, 165, 255) if name in contacts else (0, 220, 0))
+    # Hand detections remain internal. Only custom objects and the active hand
+    # contact region are rendered.
+    for name, confidence, box in objects:
+        color = (0, 165, 255) if name in contacts else (0, 220, 0)
         x1, y1, x2, y2 = [int(value) for value in box]
         cv2.rectangle(frame, (max(0, x1), max(0, y1)),
                       (min(width - 1, x2), min(height - 1, y2)), color, 2)
@@ -256,10 +405,6 @@ def draw_frame(cv2, frame, objects, hands, contacts, states, timestamp,
         label(f"{name} {confidence:.2f}{suffix}", x1, y1 - 6, color)
 
     if contact_mode == "hand-quadrant":
-        for _, _, (x1, y1, x2, y2) in hands:
-            mid_x, mid_y = int((x1 + x2) / 2), int((y1 + y2) / 2)
-            cv2.line(frame, (mid_x, int(y1)), (mid_x, int(y2)), (255, 200, 0), 1)
-            cv2.line(frame, (int(x1), mid_y), (int(x2), mid_y), (255, 200, 0), 1)
         for side, _, box in contact_regions:
             touching = (inside_roi(box, roi) and bool(contact_classes(
                 detections_in_roi(objects, roi), [(side, 1.0, box)])))
@@ -291,16 +436,12 @@ def draw_frame(cv2, frame, objects, hands, contacts, states, timestamp,
             "hand-box": "Pickup = hand overlap"}[contact_mode]
     label(f"Video time: {timestamp:.2f}s | {rule}", 8,
           line_height, (255, 255, 255))
-    for index, name in enumerate(MANUALS, 2):
-        state = states[name]
-        status = "CONTACT" if name in contacts else "NO CONTACT"
-        unit = "touches" if touch_mode else "pickups"
-        label(f"{name}: {state.count} {unit} | {status}", 8,
-              index * line_height, (255, 255, 255))
     recent = [name for name in MANUALS if states[name].last_event is not None
               and timestamp - states[name].last_event < 2.0]
     if recent:
-        label(event + ": " + ", ".join(recent), 8, 6 * line_height, (0, 255, 255))
+        label(event + ": " + ", ".join(recent), 8, 2 * line_height, (0, 255, 255))
+    if workflow is not None:
+        draw_workflow_panel(cv2, frame, workflow)
     return frame
 
 
@@ -337,6 +478,7 @@ def run(args, *, cv2_module=None, model_factory=None, landmark_factory=None):
     writer = None
     landmarker = None
     states = {name: PickupState() for name in MANUALS}
+    workflow = WorkflowState()
     memory = ManualBoxMemory()
     hand_memory = HandSideMemory(args.image_left_hand)
     frame_index = 0
@@ -356,7 +498,7 @@ def run(args, *, cv2_module=None, model_factory=None, landmark_factory=None):
         for label, model in (("Manual", manual_model), ("Hand", hand_model)):
             if model.task != "detect":
                 raise ValueError(f"{label} checkpoint must be an object detection model")
-        manual_class_ids(manual_model.names)
+        workflow_class_ids(manual_model.names)
         names = manual_model.names
         items = names.items() if isinstance(names, dict) else enumerate(names)
         class_names = {int(key): str(value) for key, value in items}
@@ -383,6 +525,11 @@ def run(args, *, cv2_module=None, model_factory=None, landmark_factory=None):
             timestamp = frame_index / fps
             landmarks = landmarker.detect(frame, timestamp) if landmarker is not None else []
             count_objects = detections_in_roi(objects, roi)
+            visible = {name for name, _, _ in count_objects}
+            completed = workflow.update_detection(
+                visible, timestamp, args.contact_duration)
+            if completed is not None:
+                print(f"{timestamp:.3f}s WORKFLOW {completed} complete")
             contact_regions = []
             if args.contact_mode == "index-finger":
                 contacts = fingertip_contacts(count_objects, [hand[INDEX_TIP] for hand in landmarks])
@@ -393,13 +540,19 @@ def run(args, *, cv2_module=None, model_factory=None, landmark_factory=None):
                 contacts = contact_classes(count_objects, contact_regions)
             else:
                 contacts = contact_classes(count_objects, detections_in_roi(hands, roi))
+            manual_events = set()
+            manual_phase = workflow.ordered_done and not workflow.manuals_done
             for name, state in states.items():
-                if state.update(name in contacts, timestamp,
+                if state.update(manual_phase and name in contacts, timestamp,
                                 args.contact_duration, args.release_duration):
+                    manual_events.add(name)
                     event = "PICKUP" if args.contact_mode == "hand-box" else "TOUCH"
                     print(f"{timestamp:.3f}s {event} {name} count={state.count}")
+            for name in workflow.accept_manual_events(manual_events):
+                print(f"{timestamp:.3f}s WORKFLOW {name} complete")
             writer.write(draw_frame(cv2, frame, objects, hands, contacts, states, timestamp,
-                                    landmarks, args.contact_mode, remembered, contact_regions, roi))
+                                    workflow, landmarks, args.contact_mode, remembered,
+                                    contact_regions, roi))
             frame_index += 1
             if frame_index % 300 == 0:
                 print(f"Processed {frame_index} frames ({frame_index / fps:.1f}s)")
@@ -411,6 +564,8 @@ def run(args, *, cv2_module=None, model_factory=None, landmark_factory=None):
         if landmarker is not None:
             landmarker.close()
     print(f"Saved {frame_index} frames to {args.output}")
+    print(f"Workflow: {workflow.completed_count}/{len(WORKFLOW_STEPS)}"
+          f"{' complete' if workflow.complete else ' incomplete'}")
     print(" | ".join(f"{name}: {state.count}" for name, state in states.items()))
     return states
 
@@ -458,7 +613,7 @@ def build_parser():
                         help="Confidence threshold for all classes in the custom object model")
     parser.add_argument("--hand-conf", type=confidence, default=0.25)
     parser.add_argument("--contact-duration", type=nonnegative_float, default=0.2,
-                        help="Continuous contact seconds before a touch/pickup event")
+                        help="Stable detection/contact seconds before completing a step")
     parser.add_argument("--release-duration", type=nonnegative_float, default=0.3,
                         help="Continuous absence seconds before rearming")
     return parser

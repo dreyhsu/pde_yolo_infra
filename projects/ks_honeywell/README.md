@@ -5,9 +5,10 @@ The default contact rule divides each hand box into four equal quarters and uses
 the lower-right quarter of a right hand or the lower-left quarter of a left hand.
 The input video is already mirrored; the script does not flip it again.
 
-The annotated MP4 shows every detected custom-model class, hand boxes split into
-quarters, the selected contact zones, remembered manual boxes, contact status,
-running touch counts, and a two-second TOUCH banner. Audio is not copied.
+The annotated MP4 shows every detected custom-model class, only the active lower
+hand quarter used for contact, remembered manual boxes, a workflow panel, and a
+two-second TOUCH banner. Full hand boxes and their dividing lines are not drawn.
+Audio is not copied.
 
 ## Setup
 
@@ -40,10 +41,10 @@ python projects/ks_honeywell/inference_manual_pickup.py --source "video/input.mp
 ```
 
 Supply a YOLO26m checkpoint trained on your custom classes, not standard COCO
-weights. The exact names `manual1`–`manual4` must exist; IDs may be in any order.
-All 11 classes are displayed, including `scanner_with_label`,
-`scanner_without_label`, `scanner_in_bag`, `box_folded`, `scanner_in_box`,
-`battery_in_bag`, and `label_on_box`. Only manuals participate in contact counting.
+weights. All 11 exact workflow names must exist; IDs may be in any order. The six
+scanner/box/battery steps advance from stable detection in their listed order,
+`manual1`–`manual4` advance from hand contact in any order, and `label_on_box`
+advances last from stable detection. Early detections or contacts are ignored.
 
 The public YOLO hand model has one class, `hand`: it does **not** predict
 anatomical left/right handedness. The script remembers the two hand positions:
@@ -60,8 +61,8 @@ Euclidean distance. Single-hand frames do not move those reference positions.
 An exact-distance tie uses the saved image-left hand. With zero detections,
 no hand contact is generated. Before the first two-hand frame, single hands stay
 unassigned and cannot trigger quadrant contact. If more than two are detected,
-only the two highest-confidence boxes determine hand identity and contact;
-all detections are still drawn. References reset for each video run.
+only the two highest-confidence boxes determine hand identity and contact. Hand
+detections are not drawn. References reset for each video run.
 
 `IMAGE_LEFT_HAND=right` is the mirrored-view default in the launcher (or
 `--image-left-hand right`). The optional `left` value reverses the pair assignment
@@ -69,10 +70,10 @@ for a different camera setup. Check the zone labels in your output. This is
 position matching for one operator; crossing hands, large unseen movements, or
 multiple operators can still produce incorrect identities.
 
-Each hand is outlined in cyan with horizontal and vertical midpoint lines. The
-active quarter is outlined in magenta, turning red when it overlaps a manual.
-Only positive-area intersection of that quarter and a manual qualifies; touching
-an edge or overlap in another quarter does not count.
+Only the active quarter is outlined in magenta, turning red when it overlaps a
+manual. The full hand outline and midpoint lines remain hidden. Only positive-area
+intersection of that quarter and a manual qualifies; touching an edge or overlap
+in another quarter does not count.
 
 ## Select and save the counting ROI
 
@@ -103,15 +104,16 @@ python projects\ks_honeywell\select_roi.py --source "video\input.mp4" --frame 10
 Both the **full hand box** and the **manual box** must be fully contained in the
 ROI for quadrant/hand-box contact to count. Partial overlap with the ROI does not
 qualify, even if the selected hand quarter lies inside. Remembered manual boxes
-are checked against the same ROI. All boxes outside remain visible. Hand identity
-references use the full frame, so hands outside the ROI can help initialize the
-pair but cannot trigger a count. In optional fingertip mode, the manual box must
-be inside the ROI. Omitting `--roi` in a direct Python invocation counts over the
-full frame; the batch launcher always supplies its saved ROI.
+are checked against the same ROI. Custom-object boxes outside remain visible. Hand
+identity references use the full frame, so hands outside the ROI can help
+initialize the pair but cannot trigger a count. In optional fingertip mode, the
+manual box must be inside the ROI. Omitting `--roi` in a direct Python invocation
+counts over the full frame; the batch launcher always supplies its saved ROI.
 
 Options: `--imgsz 640`, `--manual-conf 0.25`, `--hand-conf 0.25`,
-`--contact-duration 0.2`, `--release-duration 0.3`. `--manual-conf` filters all
-custom-model classes. Use `--device cpu` for CPU, `--device mps` for Apple Silicon,
+`--contact-duration 0.2`, `--release-duration 0.3`. Contact duration also controls
+how long an eligible visual workflow step must remain detected. `--manual-conf`
+filters all custom-model classes. Use `--device cpu` for CPU, `--device mps` for Apple Silicon,
 or omit it for Ultralytics' automatic selection. Set contact duration to `0` for
 an immediate event on qualifying overlap. Run with `--help` for all arguments.
 
