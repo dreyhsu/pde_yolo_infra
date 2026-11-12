@@ -2,6 +2,7 @@
 
 from contextlib import redirect_stdout
 import io
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -146,6 +147,17 @@ class PickupLogicTests(unittest.TestCase):
         self.assertEqual(state.count, 0)
         self.assertTrue(state.update(True, 3, 0, .3))
 
+    def test_frame_count_contact_and_release(self):
+        state = pickup.PickupState()
+        self.assertFalse(state.update_frames(True, 0.0, 3, 2))
+        self.assertFalse(state.update_frames(True, 0.1, 3, 2))
+        self.assertTrue(state.update_frames(True, 0.2, 3, 2))
+        self.assertFalse(state.update_frames(True, 0.3, 3, 2))
+        self.assertFalse(state.update_frames(False, 0.4, 3, 2))
+        self.assertFalse(state.armed)
+        self.assertFalse(state.update_frames(False, 0.5, 3, 2))
+        self.assertTrue(state.armed)
+
     def test_simultaneous_classes_and_duplicate_instances(self):
         manuals = [("manual1", .9, (0, 0, 10, 10)),
                    ("manual1", .8, (1, 1, 8, 8)),
@@ -186,6 +198,12 @@ class PickupLogicTests(unittest.TestCase):
         self.assertIsNone(workflow.update_detection({second}, 2.21, 0.2))
         self.assertEqual(workflow.update_detection({second}, 2.41, 0.2), second)
 
+    def test_workflow_supports_per_target_frame_counts(self):
+        workflow = pickup.WorkflowState()
+        first = pickup.ORDERED_STEPS[0]
+        self.assertIsNone(workflow.update_detection({first}, 0.0, 99.0, 2))
+        self.assertEqual(workflow.update_detection({first}, 0.01, 99.0, 2), first)
+
     def test_workflow_manuals_are_unordered_and_final_is_last(self):
         workflow = pickup.WorkflowState()
         workflow.completed.update(pickup.ORDERED_STEPS)
@@ -201,6 +219,31 @@ class PickupLogicTests(unittest.TestCase):
                          pickup.FINAL_STEP)
         self.assertTrue(workflow.complete)
         self.assertEqual(workflow.completed_count, 11)
+
+
+class JsonConfigTests(unittest.TestCase):
+    def test_supplied_config_contains_settings_for_every_target(self):
+        path = Path(pickup.__file__).with_name("inference_manual_pickup_config.json")
+        defaults, targets, release_frames = pickup.load_config(path)
+        self.assertEqual(set(targets), set(pickup.WORKFLOW_STEPS))
+        self.assertTrue(all(value["confidence"] == .25 for value in targets.values()))
+        self.assertTrue(all(value["required_frames"] == 6 for value in targets.values()))
+        self.assertEqual(release_frames, 9)
+        self.assertEqual(defaults["contact_mode"], "hand-quadrant")
+
+    def test_explicit_cli_value_overrides_json_default(self):
+        path = Path(pickup.__file__).with_name("inference_manual_pickup_config.json")
+        args = pickup.parse_args(["--config", str(path), "--hand-conf", "0.9"])
+        self.assertEqual(args.hand_conf, .9)
+        self.assertEqual(args.imgsz, 640)
+        self.assertEqual(args.target_settings["label_on_box"]["required_frames"], 6)
+
+    def test_unknown_target_is_rejected(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "bad.json"
+            path.write_text(json.dumps({"targets": {"unknown": {}}}), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Unknown workflow targets"):
+                pickup.load_config(path)
 
 
 class VideoPipelineTests(unittest.TestCase):
@@ -395,6 +438,20 @@ class VideoPipelineTests(unittest.TestCase):
         self.assertIn("PICKUP: manual1", texts)
         self.assertIn("WORKFLOW", texts)
         self.assertNotIn("hand 0.80", texts)
+
+    def test_per_target_confidence_filters_before_workflow_and_drawing(self):
+        self.args.target_settings = {
+            name: {"confidence": .25, "required_frames": 1}
+            for name in pickup.WORKFLOW_STEPS
+        }
+        self.args.target_settings[pickup.ORDERED_STEPS[0]]["confidence"] = .95
+        self.args.release_frames = 2
+        states = self.run_video()
+        texts = [call.args[1] for call in self.cv2.putText.call_args_list]
+        self.assertNotIn("scanner_with_label 0.90", texts)
+        self.assertIn("scanner_without_label 0.90", texts)
+        self.assertTrue(all(state.count == 0 for state in states.values()))
+        self.assertEqual(self.manual_model.predict.call_args.kwargs["conf"], .25)
 
     def test_all_eleven_classes_are_drawn_but_only_manuals_trigger_pickups(self):
         names = list(pickup.MANUALS) + [

@@ -29,8 +29,10 @@ model are **not required**. Inference does not download weights automatically.
 
 ## Run and hand assignment
 
-Edit `SOURCE`, `MANUAL_WEIGHTS`, `HAND_WEIGHTS`, `OUTPUT`, and `IMAGE_LEFT_HAND`
-in [`run_inference_manual_pickup.bat`](run_inference_manual_pickup.bat). Run it
+Edit `SOURCE`, `MANUAL_WEIGHTS`, `HAND_WEIGHTS`, and `OUTPUT` in
+[`run_inference_manual_pickup.bat`](run_inference_manual_pickup.bat). Edit model,
+contact, display, and per-target controls in
+[`inference_manual_pickup_config.json`](inference_manual_pickup_config.json). Run it
 from Anaconda Prompt, or double-click it if Conda is on your PATH. The launcher
 activates `5090`, uses GPU `0`, and resolves relative paths from the repository
 root. It opens the ROI selector if the configured `ROI` file does not exist,
@@ -39,6 +41,17 @@ then reuses that saved ROI on later runs. Choose a new output filename for every
 ```sh
 python projects/ks_honeywell/inference_manual_pickup.py --source "video/input.mp4" --manual-weights "logs/ks_honeywell/yolo26m/weights/best.pt" --hand-weights "projects/ks_honeywell/weights/hand_yolov8n.pt" --output "projects/ks_honeywell/output/pickups.mp4" --device 0 --contact-mode hand-quadrant --roi "projects/ks_honeywell/roi.json"
 ```
+
+Add `--config projects/ks_honeywell/inference_manual_pickup_config.json` to use
+the JSON settings in a direct invocation. Explicit command-line options override
+the corresponding JSON values. Each entry under `targets` has an independent
+`confidence` threshold and `required_frames` count. Ordered/final targets must be
+detected for that many consecutive frames; manual targets must remain in hand
+contact for that many consecutive frames. `contact.release_frames` controls how
+many no-contact frames rearm manual counting. The top-level sections also control
+device, image size, global detector thresholds, contact mode, hand assignment,
+hand count, ROI/path defaults, and event-banner duration. Unknown sections,
+targets, or keys stop the run with an error instead of being silently ignored.
 
 Supply a YOLO26m checkpoint trained on your custom classes, not standard COCO
 weights. All 11 exact workflow names must exist; IDs may be in any order. The six
@@ -115,7 +128,8 @@ Options: `--imgsz 640`, `--manual-conf 0.25`, `--hand-conf 0.25`,
 how long an eligible visual workflow step must remain detected. `--manual-conf`
 filters all custom-model classes. Use `--device cpu` for CPU, `--device mps` for Apple Silicon,
 or omit it for Ultralytics' automatic selection. Set contact duration to `0` for
-an immediate event on qualifying overlap. Run with `--help` for all arguments.
+an immediate event on qualifying overlap when running without JSON frame settings.
+Run with `--help` for all arguments.
 
 ## Remembered boxes and timing
 

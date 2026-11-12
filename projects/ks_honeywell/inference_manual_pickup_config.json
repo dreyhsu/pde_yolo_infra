@@ -1,0 +1,67 @@
+{
+  "paths": {
+    "roi": "projects/ks_honeywell/roi.json"
+  },
+  "inference": {
+    "device": "0",
+    "imgsz": 640,
+    "manual_conf": 0.25,
+    "hand_conf": 0.25
+  },
+  "contact": {
+    "mode": "hand-quadrant",
+    "image_left_hand": "right",
+    "num_hands": 2,
+    "required_frames": 6,
+    "release_frames": 9
+  },
+  "display": {
+    "recent_event_seconds": 2.0
+  },
+  "targets": {
+    "scanner_with_label": {
+      "confidence": 0.25,
+      "required_frames": 6
+    },
+    "scanner_without_label": {
+      "confidence": 0.25,
+      "required_frames": 6
+    },
+    "scanner_in_bag": {
+      "confidence": 0.25,
+      "required_frames": 6
+    },
+    "box_folded": {
+      "confidence": 0.25,
+      "required_frames": 6
+    },
+    "scanner_in_box": {
+      "confidence": 0.25,
+      "required_frames": 6
+    },
+    "battery_in_bag": {
+      "confidence": 0.25,
+      "required_frames": 6
+    },
+    "manual1": {
+      "confidence": 0.25,
+      "required_frames": 6
+    },
+    "manual2": {
+      "confidence": 0.25,
+      "required_frames": 6
+    },
+    "manual3": {
+      "confidence": 0.25,
+      "required_frames": 6
+    },
+    "manual4": {
+      "confidence": 0.25,
+      "required_frames": 6
+    },
+    "label_on_box": {
+      "confidence": 0.25,
+      "required_frames": 6
+    }
+  }
+}

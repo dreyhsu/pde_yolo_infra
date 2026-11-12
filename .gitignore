@@ -30,6 +30,7 @@ projects/**
 !projects/ks_honeywell/README.md
 !projects/ks_honeywell/requirements.txt
 !projects/ks_honeywell/roi.json
+!projects/ks_honeywell/inference_manual_pickup_config.json
 calib/
 __pycache__/
 *.pyc

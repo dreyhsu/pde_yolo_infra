@@ -21,6 +21,8 @@ FINAL_STEP = "label_on_box"
 WORKFLOW_STEPS = ORDERED_STEPS + MANUALS + (FINAL_STEP,)
 STEP_LABELS = {name: name.replace("_", " ").title() for name in WORKFLOW_STEPS}
 INDEX_TIP = 8
+DEFAULT_TARGET_CONFIDENCE = 0.25
+DEFAULT_TARGET_FRAMES = 6
 
 PANEL_BG = (9, 15, 26)
 WHITE = (255, 242, 235)
@@ -217,6 +219,8 @@ class PickupState:
     contact_since: float | None = None
     absent_since: float | None = None
     last_event: float | None = None
+    contact_frames: int = 0
+    absent_frames: int = 0
 
     def update(self, contact, timestamp, contact_duration, release_duration):
         """Use source-video seconds, independent of inference processing speed."""
@@ -237,6 +241,23 @@ class PickupState:
             return True
         return False
 
+    def update_frames(self, contact, timestamp, required_frames, release_frames):
+        """Frame-count alternative used by JSON-configured workflows."""
+        if not contact:
+            self.contact_frames = 0
+            self.absent_frames += 1
+            if self.absent_frames >= release_frames:
+                self.armed = True
+            return False
+        self.absent_frames = 0
+        self.contact_frames += 1
+        if self.armed and self.contact_frames >= required_frames:
+            self.count += 1
+            self.armed = False
+            self.last_event = timestamp
+            return True
+        return False
+
 
 class WorkflowState:
     """One ordered group, one unordered manual group, then one final step."""
@@ -245,6 +266,7 @@ class WorkflowState:
         self.completed = set()
         self.detection_target = None
         self.detection_since = None
+        self.detection_frames = 0
 
     @property
     def ordered_done(self):
@@ -279,22 +301,28 @@ class WorkflowState:
             return FINAL_STEP
         return None
 
-    def update_detection(self, visible, timestamp, duration):
+    def update_detection(self, visible, timestamp, duration, required_frames=None):
         """Complete only the currently eligible visual step after stable visibility."""
         target = self.expected_detection()
         if target != self.detection_target:
             self.detection_target = target
             self.detection_since = None
+            self.detection_frames = 0
         if target is None or target not in visible:
             self.detection_since = None
+            self.detection_frames = 0
             return None
+        self.detection_frames += 1
         if self.detection_since is None:
             self.detection_since = timestamp
-        if timestamp - self.detection_since + 1e-9 < duration:
+        if (required_frames is not None and self.detection_frames < required_frames) or (
+                required_frames is None
+                and timestamp - self.detection_since + 1e-9 < duration):
             return None
         self.completed.add(target)
         self.detection_target = None
         self.detection_since = None
+        self.detection_frames = 0
         return target
 
     def accept_manual_events(self, events):
@@ -380,7 +408,7 @@ def draw_workflow_panel(cv2, frame, workflow):
 
 def draw_frame(cv2, frame, objects, hands, contacts, states, timestamp,
                workflow=None, landmarks=(), contact_mode="hand-box", remembered=(),
-               contact_regions=(), roi=None):
+               contact_regions=(), roi=None, recent_event_seconds=2.0):
     height, width = frame.shape[:2]
     scale = max(0.35, min(0.7, width / 1400))
     line_height = max(17, round(30 * scale / 0.7))
@@ -437,7 +465,7 @@ def draw_frame(cv2, frame, objects, hands, contacts, states, timestamp,
     label(f"Video time: {timestamp:.2f}s | {rule}", 8,
           line_height, (255, 255, 255))
     recent = [name for name in MANUALS if states[name].last_event is not None
-              and timestamp - states[name].last_event < 2.0]
+              and timestamp - states[name].last_event < recent_event_seconds]
     if recent:
         label(event + ": " + ", ".join(recent), 8, 2 * line_height, (0, 255, 255))
     if workflow is not None:
@@ -446,6 +474,12 @@ def draw_frame(cv2, frame, objects, hands, contacts, states, timestamp,
 
 
 def validate_paths(args):
+    missing = [label for label, value in (("Source video", args.source),
+                                          ("Manual weights", args.manual_weights),
+                                          ("Hand weights", args.hand_weights),
+                                          ("Output", args.output)) if not value]
+    if missing:
+        raise ValueError(f"Missing required settings: {', '.join(missing)}")
     for label, value in (("Source video", args.source),
                          ("Manual weights", args.manual_weights),
                          ("Hand weights", args.hand_weights)):
@@ -481,6 +515,12 @@ def run(args, *, cv2_module=None, model_factory=None, landmark_factory=None):
     workflow = WorkflowState()
     memory = ManualBoxMemory()
     hand_memory = HandSideMemory(args.image_left_hand)
+    target_settings = getattr(args, "target_settings", None)
+    release_frames = getattr(args, "release_frames", None)
+    if target_settings is None:
+        target_settings = {name: {"confidence": args.manual_conf,
+                                  "required_frames": None}
+                           for name in WORKFLOW_STEPS}
     frame_index = 0
     try:
         if not cap.isOpened():
@@ -517,8 +557,14 @@ def run(args, *, cv2_module=None, model_factory=None, landmark_factory=None):
             if frame.shape[:2] != (height, width):
                 raise ValueError("Source frame dimensions changed during decoding")
             # Both detectors see the unannotated original frame.
+            model_confidence = min(
+                args.manual_conf,
+                *(setting["confidence"] for setting in target_settings.values()))
             objects = extract_detections(manual_model.predict(
-                frame, conf=args.manual_conf, **options)[0], class_names)
+                frame, conf=model_confidence, **options)[0], class_names)
+            objects = [item for item in objects
+                       if item[1] >= target_settings.get(
+                           item[0], {"confidence": args.manual_conf})["confidence"]]
             objects, remembered = memory.update(objects)
             hands = extract_detections(hand_model.predict(
                 frame, conf=args.hand_conf, **options)[0])
@@ -526,8 +572,11 @@ def run(args, *, cv2_module=None, model_factory=None, landmark_factory=None):
             landmarks = landmarker.detect(frame, timestamp) if landmarker is not None else []
             count_objects = detections_in_roi(objects, roi)
             visible = {name for name, _, _ in count_objects}
+            expected = workflow.expected_detection()
+            required_frames = (target_settings[expected]["required_frames"]
+                               if expected is not None else None)
             completed = workflow.update_detection(
-                visible, timestamp, args.contact_duration)
+                visible, timestamp, args.contact_duration, required_frames)
             if completed is not None:
                 print(f"{timestamp:.3f}s WORKFLOW {completed} complete")
             contact_regions = []
@@ -543,8 +592,15 @@ def run(args, *, cv2_module=None, model_factory=None, landmark_factory=None):
             manual_events = set()
             manual_phase = workflow.ordered_done and not workflow.manuals_done
             for name, state in states.items():
-                if state.update(manual_phase and name in contacts, timestamp,
-                                args.contact_duration, args.release_duration):
+                contact = manual_phase and name in contacts
+                if release_frames is None:
+                    fired = state.update(contact, timestamp,
+                                         args.contact_duration, args.release_duration)
+                else:
+                    fired = state.update_frames(
+                        contact, timestamp, target_settings[name]["required_frames"],
+                        release_frames)
+                if fired:
                     manual_events.add(name)
                     event = "PICKUP" if args.contact_mode == "hand-box" else "TOUCH"
                     print(f"{timestamp:.3f}s {event} {name} count={state.count}")
@@ -552,7 +608,7 @@ def run(args, *, cv2_module=None, model_factory=None, landmark_factory=None):
                 print(f"{timestamp:.3f}s WORKFLOW {name} complete")
             writer.write(draw_frame(cv2, frame, objects, hands, contacts, states, timestamp,
                                     workflow, landmarks, args.contact_mode, remembered,
-                                    contact_regions, roi))
+                                    contact_regions, roi, args.recent_event_seconds))
             frame_index += 1
             if frame_index % 300 == 0:
                 print(f"Processed {frame_index} frames ({frame_index / fps:.1f}s)")
@@ -591,10 +647,121 @@ def confidence(value):
     return parsed
 
 
+def load_config(path):
+    """Load and validate the optional JSON configuration."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise ValueError(f"Cannot read configuration {path}: {error}") from error
+    if not isinstance(data, dict):
+        raise ValueError("Configuration must contain a JSON object")
+
+    allowed_sections = {"paths", "inference", "contact", "display", "targets"}
+    unknown = set(data) - allowed_sections
+    if unknown:
+        raise ValueError(f"Unknown configuration sections: {', '.join(sorted(unknown))}")
+    sections = {}
+    for section in allowed_sections - {"targets"}:
+        value = data.get(section, {})
+        if not isinstance(value, dict):
+            raise ValueError(f"Configuration section '{section}' must be an object")
+        sections[section] = value
+
+    paths = sections["paths"]
+    inference = sections["inference"]
+    contact = sections["contact"]
+    display = sections["display"]
+    allowed_keys = {
+        "paths": {"source", "manual_weights", "hand_weights", "landmark_model",
+                  "roi", "output"},
+        "inference": {"device", "imgsz", "manual_conf", "hand_conf"},
+        "contact": {"mode", "image_left_hand", "num_hands", "required_frames",
+                    "release_frames", "contact_duration", "release_duration"},
+        "display": {"recent_event_seconds"},
+    }
+    for section, values in sections.items():
+        extra = set(values) - allowed_keys[section]
+        if extra:
+            raise ValueError(f"Unknown {section} settings: {', '.join(sorted(extra))}")
+
+    defaults = dict(paths)
+    defaults.update(inference)
+    aliases = {"mode": "contact_mode"}
+    defaults.update({aliases.get(key, key): value for key, value in contact.items()
+                     if key not in {"required_frames", "release_frames"}})
+    defaults.update(display)
+
+    try:
+        if "imgsz" in defaults:
+            defaults["imgsz"] = positive_int(defaults["imgsz"])
+        if "num_hands" in defaults:
+            defaults["num_hands"] = positive_int(defaults["num_hands"])
+        for key in ("manual_conf", "hand_conf"):
+            if key in defaults:
+                defaults[key] = confidence(defaults[key])
+        for key in ("contact_duration", "release_duration", "recent_event_seconds"):
+            if key in defaults:
+                defaults[key] = nonnegative_float(defaults[key])
+    except (TypeError, ValueError, argparse.ArgumentTypeError) as error:
+        raise ValueError(f"Invalid configuration value: {error}") from error
+    if defaults.get("contact_mode", "hand-quadrant") not in {
+            "hand-quadrant", "index-finger", "hand-box"}:
+        raise ValueError("contact.mode must be hand-quadrant, index-finger, or hand-box")
+    if defaults.get("image_left_hand", "right") not in {"left", "right"}:
+        raise ValueError("contact.image_left_hand must be left or right")
+
+    try:
+        required_frames = positive_int(contact.get("required_frames", DEFAULT_TARGET_FRAMES))
+        release_frames = positive_int(contact.get("release_frames", 9))
+    except (TypeError, ValueError, argparse.ArgumentTypeError) as error:
+        raise ValueError(f"Invalid contact frame count: {error}") from error
+
+    targets = data.get("targets", {})
+    if not isinstance(targets, dict):
+        raise ValueError("Configuration section 'targets' must be an object")
+    unknown_targets = set(targets) - set(WORKFLOW_STEPS)
+    if unknown_targets:
+        raise ValueError(f"Unknown workflow targets: {', '.join(sorted(unknown_targets))}")
+    target_settings = {}
+    base_confidence = defaults.get("manual_conf", DEFAULT_TARGET_CONFIDENCE)
+    for name in WORKFLOW_STEPS:
+        values = targets.get(name, {})
+        if not isinstance(values, dict):
+            raise ValueError(f"Target '{name}' must contain an object")
+        extra = set(values) - {"confidence", "required_frames"}
+        if extra:
+            raise ValueError(f"Unknown settings for target '{name}': {', '.join(sorted(extra))}")
+        try:
+            target_settings[name] = {
+                "confidence": confidence(values.get("confidence", base_confidence)),
+                "required_frames": positive_int(
+                    values.get("required_frames", required_frames)),
+            }
+        except (TypeError, ValueError, argparse.ArgumentTypeError) as error:
+            raise ValueError(f"Invalid settings for target '{name}': {error}") from error
+    return defaults, target_settings, release_frames
+
+
+def parse_args(argv=None):
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config")
+    known, _ = pre_parser.parse_known_args(argv)
+    defaults, target_settings, release_frames = ({}, None, None)
+    if known.config:
+        defaults, target_settings, release_frames = load_config(known.config)
+    parser = build_parser()
+    parser.set_defaults(**defaults)
+    args = parser.parse_args(argv)
+    args.target_settings = target_settings
+    args.release_frames = release_frames
+    return args
+
+
 def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", required=True, help="Input video file")
-    parser.add_argument("--manual-weights", required=True, help="Custom YOLO26m best.pt")
+    parser.add_argument("--config", help="JSON settings file; explicit CLI options override it")
+    parser.add_argument("--source", help="Input video file")
+    parser.add_argument("--manual-weights", help="Custom YOLO26m best.pt")
     parser.add_argument("--hand-weights", default=str(
         Path(__file__).resolve().parent / "weights" / "hand_yolov8n.pt"))
     parser.add_argument("--contact-mode", choices=("hand-quadrant", "index-finger", "hand-box"),
@@ -606,7 +773,7 @@ def build_parser():
         Path(__file__).resolve().parent / "weights" / "hand_landmarker.task"))
     parser.add_argument("--num-hands", type=positive_int, default=2,
                         help="Maximum hands for landmark inference (default: 2)")
-    parser.add_argument("--output", required=True, help="New annotated .mp4 file")
+    parser.add_argument("--output", help="New annotated .mp4 file")
     parser.add_argument("--device", default=None, help="Ultralytics device: 0, cpu, mps; default auto")
     parser.add_argument("--imgsz", type=positive_int, default=640)
     parser.add_argument("--manual-conf", type=confidence, default=0.25,
@@ -616,12 +783,14 @@ def build_parser():
                         help="Stable detection/contact seconds before completing a step")
     parser.add_argument("--release-duration", type=nonnegative_float, default=0.3,
                         help="Continuous absence seconds before rearming")
+    parser.add_argument("--recent-event-seconds", type=nonnegative_float, default=2.0,
+                        help="How long TOUCH/PICKUP banners remain visible")
     return parser
 
 
 def main():
-    args = build_parser().parse_args()
     try:
+        args = parse_args()
         run(args)
     except (ValueError, OSError, ImportError, RuntimeError) as error:
         print(f"Error: {error}", file=sys.stderr)
